@@ -6,9 +6,9 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
 add_library(mlx90640_reference STATIC
-  vendor/mlx90640/MLX90640_API.c
+  drivers/mlx90640/MLX90640_API.c
   src/mlx90640_i2c_linux.c)
-target_include_directories(mlx90640_reference PUBLIC include vendor/mlx90640)
+target_include_directories(mlx90640_reference PUBLIC include drivers/mlx90640)
 set_target_properties(mlx90640_reference PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED YES)
 target_link_libraries(mlx90640_reference m)
 
