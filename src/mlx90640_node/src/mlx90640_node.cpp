@@ -53,9 +53,9 @@ class Mlx90640Node final : public rclcpp::Node {
   static double refresh_hz(int code) { return 0.5 * (1 << code); }
   void publish_frame() {
     std::array<uint16_t, 834> frame{};
-    const int error = MLX90640_GetFrameData(address_, frame.data());
-    if (error != MLX90640_NO_ERROR) {
-      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "MLX90640 frame read failed: %d", error);
+    const int frame_result = MLX90640_GetFrameData(address_, frame.data());
+    if (frame_result < MLX90640_NO_ERROR) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "MLX90640 frame read failed: %d", frame_result);
       return;
     }
     std::array<float, MLX90640_PIXEL_NUM> subpage_temperatures{};
