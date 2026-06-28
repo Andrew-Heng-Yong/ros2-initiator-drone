@@ -76,8 +76,8 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts the camera at 1280x720 and 10 fps. Test the same
-settings manually:
+The drone launch file starts color at 1280x720 10 fps and depth at 640x360
+10 fps. Test the same settings manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -87,9 +87,9 @@ ros2 launch orbbec_camera gemini_e.launch.py \
   color_height:=720 \
   color_fps:=10 \
   enable_depth:=true \
-  depth_width:=1280 \
-  depth_height:=720 \
-  depth_fps:=5 \
+  depth_width:=640 \
+  depth_height:=360 \
+  depth_fps:=10 \
   enable_ir:=false
 ```
 
@@ -180,4 +180,19 @@ cd ~/orbbec_ws
 source /opt/ros/jazzy/setup.bash
 colcon build --symlink-install --packages-select orbbec_camera
 source install/setup.bash
+```
+
+If launch fails with:
+
+```text
+Failed to get depth profile: Invalid input, No matched video stream profile found!
+Stream: OB_STREAM_DEPTH, Width: 1280, Height: 720, FPS: 10
+```
+
+check the `Available profiles` printed by the driver and launch with one of
+those exact depth modes. On the Raspberry Pi test unit, the Gemini E connected
+as USB2.0 and advertised `640x360 10fps Y11`, so the project default uses:
+
+```bash
+depth_width:=640 depth_height:=360 depth_fps:=10
 ```

@@ -3,7 +3,7 @@
 This workspace is split into a top-level control package and sensor packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
-- `src/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus thermal-on-camera overlay.
+- `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus thermal-on-camera overlay.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
@@ -37,7 +37,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The launch file starts the Orbbec camera at 1280x720 10 fps and publishes the thermal overlay at `/camera/thermal_overlay/image_raw`. Tune overlay transparency at launch with:
+The launch file starts the Orbbec color stream at 1280x720 10 fps, starts depth at 640x360 10 fps, and publishes the thermal overlay at `/camera/thermal_overlay/image_raw`. Tune overlay transparency at launch with:
 
 ```bash
 ros2 launch drone_control drone_launch.py start_rosbridge:=true overlay_alpha:=0.45
@@ -49,10 +49,10 @@ For direct low-level sensor testing, you can still launch the sensor package by 
 ros2 launch mlx90640_node mlx90640_launch.py
 ```
 
-The thermal node publishes calibrated Celsius pixels as `sensor_msgs/Image` (`32FC1`, width 32, height 24) at `thermal/image_raw`, plus the sensor ambient temperature at `thermal/ambient`. Use `src/mlx90640_node/config/params.yaml` or ROS parameters to select another I2C device/address, sensor refresh rate, and emissivity:
+The thermal node publishes calibrated Celsius pixels as `sensor_msgs/Image` (`32FC1`, width 32, height 24) at `thermal/image_raw`, plus the sensor ambient temperature at `thermal/ambient`. Use `src/sensors/mlx90640_node/config/params.yaml` or ROS parameters to select another I2C device/address, sensor refresh rate, and emissivity:
 
 ```bash
-ros2 run mlx90640_node mlx90640_node --ros-args --params-file src/mlx90640_node/config/params.yaml
+ros2 run mlx90640_node mlx90640_node --ros-args --params-file src/sensors/mlx90640_node/config/params.yaml
 ```
 
 The executing user must be permitted to open `/dev/i2c-1`, usually by membership in the `i2c` group. The `python3-smbus`, `i2c-tools`, CircuitPython, and `rpi-lgpio` installations are not required by this C++ node.
