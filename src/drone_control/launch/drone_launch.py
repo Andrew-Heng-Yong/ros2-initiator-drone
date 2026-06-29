@@ -47,12 +47,12 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
-                'color_width:=1280',
-                'color_height:=720',
+                'color_width:=640',
+                'color_height:=480',
                 'color_fps:=10',
                 'enable_depth:=true',
                 'depth_width:=640',
-                'depth_height:=360',
+                'depth_height:=480',
                 'depth_fps:=10',
                 'enable_ir:=false',
             ],

@@ -76,19 +76,19 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts color at 1280x720 10 fps and depth at 640x360
+The drone launch file starts color at 640x480 10 fps and depth at 640x480
 10 fps. Test the same settings manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/orbbec_ws/install/setup.bash
 ros2 launch orbbec_camera gemini_e.launch.py \
-  color_width:=1280 \
-  color_height:=720 \
+  color_width:=640 \
+  color_height:=480 \
   color_fps:=10 \
   enable_depth:=true \
   depth_width:=640 \
-  depth_height:=360 \
+  depth_height:=480 \
   depth_fps:=10 \
   enable_ir:=false
 ```
@@ -101,22 +101,12 @@ ros2 topic hz /camera/color/image_raw
 ros2 topic hz /camera/depth/image_raw
 ```
 
-## Optional RGB Overlay Launch
+## Dashboard RGB Overlay
 
-The dashboard is thermal-only by default and renders `/thermal/image_raw`. If
-you want the optional RGB thermal overlay, install its OpenCV/cv_bridge
-dependencies and build it explicitly:
-
-```bash
-sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
-cd ~/ros2-initiator-drone
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
-source install/setup.bash
-```
-
-Then source both the Orbbec workspace and the drone workspace, and start the
-camera and overlay explicitly:
+The dashboard renders the Orbbec RGB frame from `/camera/color/image_raw` as the
+window and blends `/thermal/image_raw` into the center using the MLX90640 field
+of view, 55 degrees horizontal by 35 degrees vertical. Source both the Orbbec
+workspace and the drone workspace, then start the camera explicitly:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -125,19 +115,19 @@ source ~/ros2-initiator-drone/install/setup.bash
 ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
   start_depth_camera:=true \
-  start_thermal_overlay:=true \
-  overlay_alpha:=0.45
+  start_thermal_overlay:=false
 ```
 
-The optional ROS overlay node publishes:
+The dashboard subscribes to:
 
 ```text
-/camera/thermal_overlay/image_raw
+/camera/color/image_raw
+/thermal/image_raw
 ```
 
-The thermal overlay assumes the depth/color camera and MLX90640 are mounted at
-the same position. It maps the MLX90640 field of view, 55 degrees horizontal by
-35 degrees vertical, into the camera field of view, 67 degrees horizontal by
+The browser-side overlay assumes the depth/color camera and MLX90640 are mounted
+at the same position. It maps the MLX90640 field of view, 55 degrees horizontal
+by 35 degrees vertical, into the camera field of view, 67 degrees horizontal by
 53.6 degrees vertical.
 
 ## Troubleshooting
@@ -196,8 +186,8 @@ Stream: OB_STREAM_DEPTH, Width: 1280, Height: 720, FPS: 10
 
 check the `Available profiles` printed by the driver and launch with one of
 those exact depth modes. On the Raspberry Pi test unit, the Gemini E connected
-as USB2.0 and advertised `640x360 10fps Y11`, so the project default uses:
+as USB2.0 and advertised `640x480 10fps Y11`, so the project default uses:
 
 ```bash
-depth_width:=640 depth_height:=360 depth_fps:=10
+depth_width:=640 depth_height:=480 depth_fps:=10
 ```

@@ -49,19 +49,22 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend uses this thermal-only stream.
+The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend can also start the Orbbec camera at 640x480 10 fps and perform the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees.
 
-The RGB thermal overlay executable is optional and is not built by default. To
-build it, install the OpenCV/cv_bridge dependencies, enable its CMake option,
-then pass both camera flags and tune overlay transparency at launch:
+To start the Orbbec camera alongside the thermal node for browser-side overlay,
+pass the camera flag:
+
+```bash
+ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true
+```
+
+The optional ROS-side overlay executable is still available for experiments, but
+it is not required by the dashboard. Build it only if you need the ROS topic
+`/camera/thermal_overlay/image_raw`:
 
 ```bash
 sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
 colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
-source install/setup.bash
-```
-
-```bash
 ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true start_thermal_overlay:=true overlay_alpha:=0.45
 ```
 
