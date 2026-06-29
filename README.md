@@ -23,6 +23,18 @@ colcon build --packages-up-to drone_control
 source install/setup.bash
 ```
 
+If colcon still looks for the old `src/mlx90640_node` path after the package
+move to `src/sensors/mlx90640_node`, clear the stale CMake package build caches
+and rebuild:
+
+```bash
+cd ~/ros2-initiator-drone
+rm -rf build/mlx90640_node build/drone_control install/mlx90640_node install/drone_control
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to drone_control
+source install/setup.bash
+```
+
 For Orbbec Gemini E / Dabai-style depth camera setup, read `DEPTH_CAMERA_DRIVER_SETUP.md`.
 
 Launch the full drone graph:
@@ -39,7 +51,15 @@ ros2 launch drone_control drone_launch.py start_rosbridge:=true
 
 The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend uses this thermal-only stream.
 
-To also start the optional Orbbec camera and RGB thermal overlay, pass both camera flags and tune overlay transparency at launch:
+The RGB thermal overlay executable is optional and is not built by default. To
+build it, install the OpenCV/cv_bridge dependencies, enable its CMake option,
+then pass both camera flags and tune overlay transparency at launch:
+
+```bash
+sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
+colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
+source install/setup.bash
+```
 
 ```bash
 ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true start_thermal_overlay:=true overlay_alpha:=0.45

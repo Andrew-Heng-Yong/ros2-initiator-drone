@@ -104,8 +104,19 @@ ros2 topic hz /camera/depth/image_raw
 ## Optional RGB Overlay Launch
 
 The dashboard is thermal-only by default and renders `/thermal/image_raw`. If
-you want the optional RGB thermal overlay, source both the Orbbec workspace and
-the drone workspace, then start the camera and overlay explicitly:
+you want the optional RGB thermal overlay, install its OpenCV/cv_bridge
+dependencies and build it explicitly:
+
+```bash
+sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
+cd ~/ros2-initiator-drone
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
+source install/setup.bash
+```
+
+Then source both the Orbbec workspace and the drone workspace, and start the
+camera and overlay explicitly:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
