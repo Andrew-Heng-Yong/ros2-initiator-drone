@@ -37,7 +37,7 @@ source install/setup.bash
 
 For Orbbec Gemini E / Dabai-style depth camera setup, read `DEPTH_CAMERA_DRIVER_SETUP.md`.
 
-Launch the full drone graph:
+Launch the top-level drone graph:
 
 ```bash
 ros2 launch drone_control drone_launch.py
@@ -49,7 +49,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend can also start the Orbbec camera at 640x480 10 fps and perform the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts RGB first and delays the MLX90640 node briefly so the browser can lock onto the RGB stream before thermal fallback.
+The frontend starts the Orbbec camera at 640x480 10 fps and performs the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts RGB first and waits for the first RGB frame before starting the MLX90640 node, so thermal only appears as an overlay source after the camera is running.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:
