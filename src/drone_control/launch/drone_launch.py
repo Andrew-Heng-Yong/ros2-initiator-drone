@@ -8,8 +8,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.conditions import IfCondition
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -64,7 +64,21 @@ def generate_launch_description():
             executable='mlx90640_node',
             name='mlx90640_node',
             output='screen',
+            condition=UnlessCondition(start_depth_camera),
             parameters=[mlx90640_params],
+        ),
+        TimerAction(
+            period=6.0,
+            actions=[
+                Node(
+                    package='mlx90640_node',
+                    executable='mlx90640_node',
+                    name='mlx90640_node',
+                    output='screen',
+                    parameters=[mlx90640_params],
+                ),
+            ],
+            condition=IfCondition(start_depth_camera),
         ),
         Node(
             package='mlx90640_node',

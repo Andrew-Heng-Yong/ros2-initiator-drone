@@ -49,7 +49,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend can also start the Orbbec camera at 640x480 10 fps and perform the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees.
+The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend can also start the Orbbec camera at 640x480 10 fps and perform the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts RGB first and delays the MLX90640 node briefly so the browser can lock onto the RGB stream before thermal fallback.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:

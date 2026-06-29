@@ -106,7 +106,9 @@ ros2 topic hz /camera/depth/image_raw
 The dashboard renders the Orbbec RGB frame from `/camera/color/image_raw` as the
 window and blends `/thermal/image_raw` into the center using the MLX90640 field
 of view, 55 degrees horizontal by 35 degrees vertical. Source both the Orbbec
-workspace and the drone workspace, then start the camera explicitly:
+workspace and the drone workspace, then start the camera explicitly. The drone
+launch starts RGB first and delays the MLX90640 node briefly so the dashboard
+prefers the RGB stream before thermal fallback.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
