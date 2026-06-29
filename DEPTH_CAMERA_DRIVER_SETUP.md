@@ -101,30 +101,24 @@ ros2 topic hz /camera/color/image_raw
 ros2 topic hz /camera/depth/image_raw
 ```
 
-## Dashboard Launch Integration
+## Optional RGB Overlay Launch
 
-The frontend service sources:
-
-```text
-~/orbbec_ws/install/setup.bash
-```
-
-before launching the drone stack. If your Orbbec workspace is somewhere else,
-set `ORBBEC_SETUP` before starting the dashboard:
+The dashboard is thermal-only by default and renders `/thermal/image_raw`. If
+you want the optional RGB thermal overlay, source both the Orbbec workspace and
+the drone workspace, then start the camera and overlay explicitly:
 
 ```bash
-export ORBBEC_SETUP=/path/to/orbbec_ws/install/setup.bash
-cd ~/frontend-initiator-drone
-npm start
+source /opt/ros/jazzy/setup.bash
+source ~/orbbec_ws/install/setup.bash
+source ~/ros2-initiator-drone/install/setup.bash
+ros2 launch drone_control drone_launch.py \
+  start_rosbridge:=true \
+  start_depth_camera:=true \
+  start_thermal_overlay:=true \
+  overlay_alpha:=0.45
 ```
 
-The dashboard starts:
-
-```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true overlay_alpha:=0.45
-```
-
-The ROS overlay node publishes:
+The optional ROS overlay node publishes:
 
 ```text
 /camera/thermal_overlay/image_raw

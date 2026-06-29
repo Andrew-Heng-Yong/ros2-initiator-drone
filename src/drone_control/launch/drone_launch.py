@@ -20,6 +20,7 @@ def generate_launch_description():
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
+    start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
 
     return LaunchDescription([
@@ -30,8 +31,13 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'start_depth_camera',
-            default_value='true',
+            default_value='false',
             description='Start the Orbbec depth/color camera driver.',
+        ),
+        DeclareLaunchArgument(
+            'start_thermal_overlay',
+            default_value='false',
+            description='Start the RGB camera thermal overlay node.',
         ),
         DeclareLaunchArgument(
             'overlay_alpha',
@@ -65,6 +71,7 @@ def generate_launch_description():
             executable='thermal_overlay_node',
             name='thermal_overlay_node',
             output='screen',
+            condition=IfCondition(start_thermal_overlay),
             parameters=[{
                 'alpha': ParameterValue(overlay_alpha, value_type=float),
                 'camera_topic': '/camera/color/image_raw',

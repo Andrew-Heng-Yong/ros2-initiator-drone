@@ -3,7 +3,7 @@
 This workspace is split into a top-level control package and sensor packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
-- `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus thermal-on-camera overlay.
+- `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
@@ -37,10 +37,12 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The launch file starts the Orbbec color stream at 1280x720 10 fps, starts depth at 640x360 10 fps, and publishes the thermal overlay at `/camera/thermal_overlay/image_raw`. Tune overlay transparency at launch with:
+The default launch starts the MLX90640 thermal node and publishes raw thermal frames at `/thermal/image_raw`. The frontend uses this thermal-only stream.
+
+To also start the optional Orbbec camera and RGB thermal overlay, pass both camera flags and tune overlay transparency at launch:
 
 ```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true overlay_alpha:=0.45
+ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true start_thermal_overlay:=true overlay_alpha:=0.45
 ```
 
 For direct low-level sensor testing, you can still launch the sensor package by itself:
