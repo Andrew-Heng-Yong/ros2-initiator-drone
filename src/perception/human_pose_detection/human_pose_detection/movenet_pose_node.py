@@ -277,19 +277,9 @@ class MovenetPoseNode(Node):
             if s1 >= self.confidence_threshold and s2 >= self.confidence_threshold:
                 cv2.line(output, (int(x1), int(y1)), (int(x2), int(y2)), (64, 220, 255), 2)
 
-        for index, (x, y, score) in enumerate(keypoints):
+        for x, y, score in keypoints:
             if score >= self.confidence_threshold:
                 cv2.circle(output, (int(x), int(y)), 4, (44, 255, 120), -1)
-                cv2.putText(
-                    output,
-                    KEYPOINT_NAMES[index],
-                    (int(x) + 5, int(y) - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.35,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
 
         if bbox is not None:
             x, y, w, h = bbox
