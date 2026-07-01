@@ -25,7 +25,11 @@ def main():
     args = parser.parse_args()
 
     if not args.model or not os.path.isfile(os.path.expanduser(args.model)):
-        print('Missing MoveNet model file. Set MOVENET_MODEL_PATH or pose_model_path to the .tflite path.')
+        print(
+            'Missing MoveNet model file. Put the MoveNet Lightning INT8 .tflite at '
+            '~/models/movenet_lightning_int8.tflite, or set MOVENET_MODEL_PATH / '
+            'pose_model_path to the real file path.'
+        )
         return 1
 
     missing = []

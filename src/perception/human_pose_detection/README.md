@@ -12,6 +12,11 @@ ros2 launch human_pose_detection movenet_pose_launch.py \
   image_topic:=/camera/image_raw
 ```
 
+The dashboard also auto-checks common model locations:
+
+- `~/models/movenet_lightning_int8.tflite`
+- `~/models/lite-model_movenet_singlepose_lightning_tflite_int8_4.tflite`
+
 The top-level drone launch uses `/camera/color/image_raw` by default:
 
 ```bash
