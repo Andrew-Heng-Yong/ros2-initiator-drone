@@ -137,10 +137,14 @@ class MovenetPoseNode(Node):
             return
 
         rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
-        keypoints, scale, pad_x, pad_y = self.run_inference(rgb_image)
-        decoded = self.decode_keypoints(keypoints, msg.width, msg.height, scale, pad_x, pad_y)
-        bbox = self.bounding_box(decoded)
-        detected = bbox is not None
+        try:
+            keypoints, scale, pad_x, pad_y = self.run_inference(rgb_image)
+            decoded = self.decode_keypoints(keypoints, msg.width, msg.height, scale, pad_x, pad_y)
+            bbox = self.bounding_box(decoded)
+            detected = bbox is not None
+        except Exception as error:
+            self.get_logger().warn(f'Pose inference failed for this frame: {error}')
+            return
 
         self.publish_result(decoded, bbox, detected)
         self.detected_pub.publish(Bool(data=detected))
@@ -165,15 +169,15 @@ class MovenetPoseNode(Node):
         # MoveNet Lightning expects a square RGB tensor. Letterboxing preserves
         # the camera aspect ratio, which usually gives steadier keypoints than
         # stretching the whole frame into a square.
-        input_image, scale, pad_x, pad_y = self.letterbox(rgb_image)
+        input_image, image_scale, pad_x, pad_y = self.letterbox(rgb_image)
         input_tensor = np.expand_dims(input_image, axis=0)
 
         if np.issubdtype(self.input_dtype, np.floating):
             input_tensor = input_tensor.astype(self.input_dtype) / 255.0
         else:
-            scale, zero_point = self.input_details.get('quantization', (0.0, 0))
-            if scale and scale > 0:
-                quantized = np.round(input_tensor.astype(np.float32) / scale + zero_point)
+            input_scale, input_zero_point = self.input_details.get('quantization', (0.0, 0))
+            if input_scale and input_scale > 0:
+                quantized = np.round(input_tensor.astype(np.float32) / input_scale + input_zero_point)
             else:
                 quantized = input_tensor.astype(np.float32)
             limits = np.iinfo(self.input_dtype)
@@ -183,10 +187,10 @@ class MovenetPoseNode(Node):
         self.interpreter.invoke()
         output_tensor = self.interpreter.get_tensor(self.output_details['index'])
         if not np.issubdtype(output_tensor.dtype, np.floating):
-            scale, zero_point = self.output_details.get('quantization', (0.0, 0))
-            if scale and scale > 0:
-                output_tensor = (output_tensor.astype(np.float32) - zero_point) * scale
-        return np.squeeze(output_tensor), scale, pad_x, pad_y
+            output_scale, output_zero_point = self.output_details.get('quantization', (0.0, 0))
+            if output_scale and output_scale > 0:
+                output_tensor = (output_tensor.astype(np.float32) - output_zero_point) * output_scale
+        return np.squeeze(output_tensor), image_scale, pad_x, pad_y
 
     def letterbox(self, rgb_image: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
         height, width = rgb_image.shape[:2]
@@ -211,6 +215,10 @@ class MovenetPoseNode(Node):
         pad_y: int,
     ) -> List[Tuple[float, float, float]]:
         # MoveNet returns 17 keypoints as normalized [y, x, score].
+        if scale <= 0:
+            self.get_logger().warn('Invalid letterbox scale; skipping keypoint decode for this frame.')
+            return [(-1.0, -1.0, 0.0)] * 17
+
         keypoints = raw_keypoints.reshape(17, 3)
         decoded = []
         for y_norm, x_norm, score in keypoints:
