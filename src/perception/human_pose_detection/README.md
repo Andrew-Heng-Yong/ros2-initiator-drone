@@ -49,4 +49,30 @@ Coordinates are in source image pixels. A missing keypoint has `x=-1`, `y=-1`, a
 
 ## Runtime Dependencies
 
-Install either `tflite_runtime` or TensorFlow with Lite support, plus OpenCV and `cv_bridge`.
+Install OpenCV/cv_bridge and one TensorFlow Lite interpreter:
+
+```bash
+sudo apt install -y ros-jazzy-cv-bridge python3-opencv python3-numpy
+```
+
+Then install one of these, depending on what is available for the Pi OS/Python version:
+
+```bash
+python3 -m pip install --break-system-packages tflite-runtime
+# or
+python3 -m pip install --break-system-packages ai-edge-litert
+# or, heavier:
+python3 -m pip install --break-system-packages tensorflow
+```
+
+Quick check:
+
+```bash
+python3 -c "from tflite_runtime.interpreter import Interpreter; print('tflite ok')"
+```
+
+If you installed LiteRT instead, check:
+
+```bash
+python3 -c "from ai_edge_litert.interpreter import Interpreter; print('litert ok')"
+```

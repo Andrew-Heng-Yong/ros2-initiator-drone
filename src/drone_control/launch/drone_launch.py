@@ -7,7 +7,7 @@ The sensor packages stay focused on their own drivers.
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -19,6 +19,7 @@ def generate_launch_description():
     pose_model_path = LaunchConfiguration('pose_model_path')
     pose_image_topic = LaunchConfiguration('pose_image_topic')
     pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
+    orbbec_setup = LaunchConfiguration('orbbec_setup')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -51,17 +52,37 @@ def generate_launch_description():
             default_value='0.3',
             description='Minimum keypoint confidence used for person detection.',
         ),
+        DeclareLaunchArgument(
+            'orbbec_setup',
+            default_value=EnvironmentVariable(
+                'ORBBEC_SETUP',
+                default_value='/home/andrew/orbbec_ws/install/setup.bash',
+            ),
+            description='Path to the Orbbec driver workspace setup.bash.',
+        ),
         ExecuteProcess(
             cmd=[
-                'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
-                'color_width:=640',
-                'color_height:=480',
-                'color_fps:=10',
-                'enable_depth:=false',
-                'depth_width:=640',
-                'depth_height:=480',
-                'depth_fps:=10',
-                'enable_ir:=false',
+                'bash',
+                '-lc',
+                [
+                    'if [ ! -f "',
+                    orbbec_setup,
+                    '" ]; then echo "Missing Orbbec setup file: ',
+                    orbbec_setup,
+                    '"; exit 1; fi; '
+                    'source "',
+                    orbbec_setup,
+                    '"; '
+                    'exec ros2 launch orbbec_camera gemini_e.launch.py '
+                    'color_width:=640 '
+                    'color_height:=480 '
+                    'color_fps:=10 '
+                    'enable_depth:=false '
+                    'depth_width:=640 '
+                    'depth_height:=480 '
+                    'depth_fps:=10 '
+                    'enable_ir:=false',
+                ],
             ],
             output='screen',
             condition=IfCondition(start_camera),

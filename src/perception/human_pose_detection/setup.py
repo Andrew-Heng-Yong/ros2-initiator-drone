@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'movenet_pose_node = human_pose_detection.movenet_pose_node:main',
+            'check_runtime = human_pose_detection.check_runtime:main',
         ],
     },
 )

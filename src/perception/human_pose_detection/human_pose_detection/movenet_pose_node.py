@@ -13,9 +13,15 @@ try:
     from tflite_runtime.interpreter import Interpreter
 except ImportError:
     try:
-        from tensorflow.lite.python.interpreter import Interpreter
+        from ai_edge_litert.interpreter import Interpreter
     except ImportError:
-        Interpreter = None
+        try:
+            from tensorflow.lite.python.interpreter import Interpreter
+        except ImportError:
+            try:
+                from tensorflow.lite import Interpreter
+            except ImportError:
+                Interpreter = None
 
 
 KEYPOINT_NAMES = [
@@ -92,7 +98,9 @@ class MovenetPoseNode(Node):
 
     def _load_model(self) -> None:
         if Interpreter is None:
-            raise RuntimeError('Install tflite_runtime or tensorflow to run MoveNet inference.')
+            raise RuntimeError(
+                'Install a TensorFlow Lite interpreter: tflite_runtime, ai-edge-litert, or tensorflow.'
+            )
         if not self.model_path:
             raise RuntimeError('model_path parameter is required.')
         if not os.path.isfile(self.model_path):
