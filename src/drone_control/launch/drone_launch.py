@@ -50,7 +50,7 @@ def generate_launch_description():
                 'color_width:=640',
                 'color_height:=480',
                 'color_fps:=10',
-                'enable_depth:=true',
+                'enable_depth:=false',
                 'depth_width:=640',
                 'depth_height:=480',
                 'depth_fps:=10',
@@ -59,15 +59,13 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(start_depth_camera),
         ),
-        ExecuteProcess(
-            cmd=[
-                'bash', '-lc',
-                'ros2 topic echo --once /camera/color/image_raw > /dev/null && '
-                f'exec ros2 run mlx90640_node mlx90640_node --ros-args '
-                f'--params-file "{mlx90640_params}"',
-            ],
+        Node(
+            package='mlx90640_node',
+            executable='mlx90640_node',
+            name='mlx90640_node',
             output='screen',
             condition=IfCondition(start_depth_camera),
+            parameters=[mlx90640_params],
         ),
         Node(
             package='mlx90640_node',
