@@ -1,83 +1,43 @@
 # ROS 2 initiator drone
 
-This workspace is split into a top-level control package and sensor packages:
+This workspace is split into a top-level launch package and perception packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
-- `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
+- `src/perception/human_pose_detection`: RGB-only MoveNet Lightning INT8 human pose detection.
 
-`mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
-
-## Run on the Raspberry Pi
-
-Verify the sensor is visible, normally at `0x33`:
-
-```bash
-sudo i2cdetect -y 1
-```
-
-Build the top-level control package and its workspace dependencies:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to drone_control
-source install/setup.bash
-```
-
-If colcon still looks for the old `src/mlx90640_node` path after the package
-move to `src/sensors/mlx90640_node`, clear the stale CMake package build caches
-and rebuild:
+## Build
 
 ```bash
 cd ~/ros2-initiator-drone
-rm -rf build/mlx90640_node build/drone_control install/mlx90640_node install/drone_control
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-up-to drone_control
 source install/setup.bash
 ```
 
-For Orbbec Gemini E / Dabai-style depth camera setup, read `DEPTH_CAMERA_DRIVER_SETUP.md`.
+The pose node needs `cv_bridge`, OpenCV, and either `tflite_runtime` or TensorFlow Lite support available in the Python environment.
 
-Launch the top-level drone graph:
+## Launch
 
-```bash
-ros2 launch drone_control drone_launch.py
-```
-
-Launch with rosbridge for the frontend:
+Run the RGB camera, MoveNet pose node, and rosbridge:
 
 ```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true
+ros2 launch drone_control drone_launch.py \
+  start_rosbridge:=true \
+  start_camera:=true \
+  pose_model_path:=/path/to/movenet_lightning_int8.tflite
 ```
 
-The frontend starts the Orbbec camera at 640x480 10 fps and performs the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts RGB first and waits for the first RGB frame before starting the MLX90640 node, so thermal only appears as an overlay source after the camera is running.
-
-To start the Orbbec camera alongside the thermal node for browser-side overlay,
-pass the camera flag:
+Run only the pose node against an existing camera topic:
 
 ```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true
+ros2 launch human_pose_detection movenet_pose_launch.py \
+  model_path:=/path/to/movenet_lightning_int8.tflite \
+  image_topic:=/camera/image_raw
 ```
 
-The optional ROS-side overlay executable is still available for experiments, but
-it is not required by the dashboard. Build it only if you need the ROS topic
-`/camera/thermal_overlay/image_raw`:
+## Pose Topics
 
-```bash
-sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
-colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
-ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true start_thermal_overlay:=true overlay_alpha:=0.45
-```
-
-For direct low-level sensor testing, you can still launch the sensor package by itself:
-
-```bash
-ros2 launch mlx90640_node mlx90640_launch.py
-```
-
-The thermal node publishes calibrated Celsius pixels as `sensor_msgs/Image` (`32FC1`, width 32, height 24) at `thermal/image_raw`, plus the sensor ambient temperature at `thermal/ambient`. Use `src/sensors/mlx90640_node/config/params.yaml` or ROS parameters to select another I2C device/address, sensor refresh rate, and emissivity:
-
-```bash
-ros2 run mlx90640_node mlx90640_node --ros-args --params-file src/sensors/mlx90640_node/config/params.yaml
-```
-
-The executing user must be permitted to open `/dev/i2c-1`, usually by membership in the `i2c` group. The `python3-smbus`, `i2c-tools`, CircuitPython, and `rpi-lgpio` installations are not required by this C++ node.
+- Input image: `/camera/image_raw` by default, `/camera/color/image_raw` in the top-level drone launch
+- Keypoints: `/human_pose/keypoints`
+- Detection flag: `/human_pose/person_detected`
+- Debug image: `/human_pose/debug_image`

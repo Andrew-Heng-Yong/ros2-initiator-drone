@@ -76,8 +76,8 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts color at 640x480 10 fps and depth at 640x480
-10 fps. Test the same settings manually:
+The drone launch file starts color at 640x480 10 fps and leaves depth disabled.
+Test the same settings manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -86,7 +86,7 @@ ros2 launch orbbec_camera gemini_e.launch.py \
   color_width:=640 \
   color_height:=480 \
   color_fps:=10 \
-  enable_depth:=true \
+  enable_depth:=false \
   depth_width:=640 \
   depth_height:=480 \
   depth_fps:=10 \
@@ -96,20 +96,15 @@ ros2 launch orbbec_camera gemini_e.launch.py \
 Verify topics:
 
 ```bash
-ros2 topic list | grep -E "camera|depth|image|camera_info"
+ros2 topic list | grep -E "camera|image|camera_info"
 ros2 topic hz /camera/color/image_raw
-ros2 topic hz /camera/depth/image_raw
 ```
 
-## Dashboard RGB Overlay
+## Dashboard Pose Debug Stream
 
-The dashboard renders the Orbbec RGB frame from `/camera/color/image_raw` as the
-window and blends `/thermal/image_raw` into the center using the MLX90640 field
-of view, 55 degrees horizontal by 35 degrees vertical. Source both the Orbbec
-workspace and the drone workspace, then start the camera explicitly. The drone
-launch starts RGB first and waits for the first RGB frame before starting the
-MLX90640 node, so thermal only appears as an overlay source after the camera is
-running.
+The dashboard renders `/human_pose/debug_image`, which is produced by the
+RGB-only MoveNet pose node from `/camera/color/image_raw`. Source both the
+Orbbec workspace and the drone workspace, then start the camera explicitly.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -117,21 +112,18 @@ source ~/orbbec_ws/install/setup.bash
 source ~/ros2-initiator-drone/install/setup.bash
 ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
-  start_depth_camera:=true \
-  start_thermal_overlay:=false
+  start_camera:=true \
+  pose_model_path:=/path/to/movenet_lightning_int8.tflite
 ```
 
-The dashboard subscribes to:
+The pose stack uses:
 
 ```text
-/camera/color/image_raw
-/thermal/image_raw
+input:  /camera/color/image_raw
+output: /human_pose/keypoints
+output: /human_pose/person_detected
+output: /human_pose/debug_image
 ```
-
-The browser-side overlay assumes the depth/color camera and MLX90640 are mounted
-at the same position. It maps the MLX90640 field of view, 55 degrees horizontal
-by 35 degrees vertical, into the camera field of view, 67 degrees horizontal by
-53.6 degrees vertical.
 
 ## Troubleshooting
 

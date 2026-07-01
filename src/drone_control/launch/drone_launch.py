@@ -4,9 +4,6 @@ Add future drone nodes here (flight controller, camera, telemetry, and so on).
 The sensor packages stay focused on their own drivers.
 """
 
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
@@ -16,12 +13,12 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    mlx90640_share = get_package_share_directory('mlx90640_node')
-    mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
-    start_depth_camera = LaunchConfiguration('start_depth_camera')
-    start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
-    overlay_alpha = LaunchConfiguration('overlay_alpha')
+    start_camera = LaunchConfiguration('start_camera')
+    start_pose = LaunchConfiguration('start_pose')
+    pose_model_path = LaunchConfiguration('pose_model_path')
+    pose_image_topic = LaunchConfiguration('pose_image_topic')
+    pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -30,19 +27,29 @@ def generate_launch_description():
             description='Start rosbridge websocket on port 9090 for the frontend.',
         ),
         DeclareLaunchArgument(
-            'start_depth_camera',
+            'start_camera',
             default_value='false',
-            description='Start the Orbbec depth/color camera driver.',
+            description='Start the Orbbec RGB camera driver.',
         ),
         DeclareLaunchArgument(
-            'start_thermal_overlay',
-            default_value='false',
-            description='Start the RGB camera thermal overlay node.',
+            'start_pose',
+            default_value='true',
+            description='Start the RGB-only MoveNet human pose detection node.',
         ),
         DeclareLaunchArgument(
-            'overlay_alpha',
-            default_value='0.45',
-            description='Thermal overlay opacity, from 0.0 to 1.0.',
+            'pose_model_path',
+            default_value='',
+            description='Path to the MoveNet Lightning INT8 TensorFlow Lite model.',
+        ),
+        DeclareLaunchArgument(
+            'pose_image_topic',
+            default_value='/camera/color/image_raw',
+            description='RGB image topic consumed by the pose detector.',
+        ),
+        DeclareLaunchArgument(
+            'pose_confidence_threshold',
+            default_value='0.3',
+            description='Minimum keypoint confidence used for person detection.',
         ),
         ExecuteProcess(
             cmd=[
@@ -57,37 +64,24 @@ def generate_launch_description():
                 'enable_ir:=false',
             ],
             output='screen',
-            condition=IfCondition(start_depth_camera),
+            condition=IfCondition(start_camera),
         ),
         Node(
-            package='mlx90640_node',
-            executable='mlx90640_node',
-            name='mlx90640_node',
+            package='human_pose_detection',
+            executable='movenet_pose_node',
+            name='movenet_pose_node',
             output='screen',
-            condition=IfCondition(start_depth_camera),
-            parameters=[mlx90640_params],
-        ),
-        Node(
-            package='mlx90640_node',
-            executable='thermal_overlay_node',
-            name='thermal_overlay_node',
-            output='screen',
-            condition=IfCondition(start_thermal_overlay),
+            condition=IfCondition(start_pose),
             parameters=[{
-                'alpha': ParameterValue(overlay_alpha, value_type=float),
-                'camera_topic': '/camera/color/image_raw',
-                'thermal_topic': '/thermal/image_raw',
-                'output_topic': '/camera/thermal_overlay/image_raw',
-                'camera_hfov_deg': 67.0,
-                'camera_vfov_deg': 53.6,
-                'thermal_hfov_deg': 55.0,
-                'thermal_vfov_deg': 35.0,
+                'model_path': pose_model_path,
+                'image_topic': pose_image_topic,
+                'confidence_threshold': ParameterValue(pose_confidence_threshold, value_type=float),
             }],
         ),
         Node(
             package='rosbridge_server',
             executable='rosbridge_websocket',
-            name='thermal_rosbridge',
+            name='camera_rosbridge',
             output='screen',
             condition=IfCondition(start_rosbridge),
         ),
