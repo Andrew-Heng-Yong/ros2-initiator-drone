@@ -4,6 +4,10 @@ Add future drone nodes here (flight controller, camera, telemetry, and so on).
 The sensor packages stay focused on their own drivers.
 """
 
+import os
+import yaml
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
@@ -12,14 +16,30 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+def load_settings():
+    share_dir = get_package_share_directory('drone_control')
+    settings_path = os.environ.get(
+        'DRONE_SETTINGS_FILE',
+        os.path.join(share_dir, 'config', 'drone_settings.yaml'),
+    )
+    with open(settings_path, 'r', encoding='utf-8') as settings_file:
+        return yaml.safe_load(settings_file) or {}
+
+
 def generate_launch_description():
+    settings = load_settings()
+    camera = settings.get('camera', {})
+    pose = settings.get('pose', {})
+
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_camera = LaunchConfiguration('start_camera')
     start_pose = LaunchConfiguration('start_pose')
     pose_model_path = LaunchConfiguration('pose_model_path')
     pose_image_topic = LaunchConfiguration('pose_image_topic')
     pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
+    pose_min_confident_keypoints = LaunchConfiguration('pose_min_confident_keypoints')
     pose_max_inference_fps = LaunchConfiguration('pose_max_inference_fps')
+    pose_publish_debug_image = LaunchConfiguration('pose_publish_debug_image')
     orbbec_setup = LaunchConfiguration('orbbec_setup')
 
     return LaunchDescription([
@@ -45,18 +65,28 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'pose_image_topic',
-            default_value='/camera/color/image_raw',
+            default_value=str(pose.get('image_topic', '/camera/color/image_raw')),
             description='RGB image topic consumed by the pose detector.',
         ),
         DeclareLaunchArgument(
             'pose_confidence_threshold',
-            default_value='0.2',
+            default_value=str(pose.get('confidence_threshold', 0.2)),
             description='Minimum keypoint confidence used for person detection.',
         ),
         DeclareLaunchArgument(
+            'pose_min_confident_keypoints',
+            default_value=str(pose.get('min_confident_keypoints', 5)),
+            description='Minimum keypoints above threshold required to call a person detected.',
+        ),
+        DeclareLaunchArgument(
             'pose_max_inference_fps',
-            default_value='5.0',
+            default_value=str(pose.get('max_inference_fps', 5.0)),
             description='Maximum MoveNet inference rate. Use 0 to process every camera frame.',
+        ),
+        DeclareLaunchArgument(
+            'pose_publish_debug_image',
+            default_value=str(pose.get('publish_debug_image', True)).lower(),
+            description='Publish annotated pose debug image.',
         ),
         DeclareLaunchArgument(
             'orbbec_setup',
@@ -79,15 +109,15 @@ def generate_launch_description():
                     'source "',
                     orbbec_setup,
                     '"; '
-                    'exec ros2 launch orbbec_camera gemini_e.launch.py '
-                    'color_width:=640 '
-                    'color_height:=480 '
-                    'color_fps:=5 '
-                    'enable_depth:=false '
-                    'depth_width:=640 '
-                    'depth_height:=480 '
-                    'depth_fps:=10 '
-                    'enable_ir:=false',
+                    f'exec ros2 launch orbbec_camera gemini_e.launch.py '
+                    f'color_width:={int(camera.get("color_width", 640))} '
+                    f'color_height:={int(camera.get("color_height", 480))} '
+                    f'color_fps:={int(camera.get("color_fps", 5))} '
+                    f'enable_depth:={str(camera.get("enable_depth", False)).lower()} '
+                    f'depth_width:={int(camera.get("depth_width", 640))} '
+                    f'depth_height:={int(camera.get("depth_height", 480))} '
+                    f'depth_fps:={int(camera.get("depth_fps", 10))} '
+                    f'enable_ir:={str(camera.get("enable_ir", False)).lower()}',
                 ],
             ],
             output='screen',
@@ -103,7 +133,9 @@ def generate_launch_description():
                 'model_path': pose_model_path,
                 'image_topic': pose_image_topic,
                 'confidence_threshold': ParameterValue(pose_confidence_threshold, value_type=float),
+                'min_confident_keypoints': ParameterValue(pose_min_confident_keypoints, value_type=int),
                 'max_inference_fps': ParameterValue(pose_max_inference_fps, value_type=float),
+                'publish_debug_image': ParameterValue(pose_publish_debug_image, value_type=bool),
             }],
         ),
         Node(

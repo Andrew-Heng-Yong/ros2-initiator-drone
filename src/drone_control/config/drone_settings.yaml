@@ -1,0 +1,16 @@
+camera:
+  color_width: 640
+  color_height: 480
+  color_fps: 5
+  enable_depth: false
+  depth_width: 640
+  depth_height: 480
+  depth_fps: 5
+  enable_ir: false
+
+pose:
+  image_topic: /camera/color/image_raw
+  confidence_threshold: 0.4
+  min_confident_keypoints: 7
+  max_inference_fps: 5.0
+  publish_debug_image: true

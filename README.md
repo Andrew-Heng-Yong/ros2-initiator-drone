@@ -27,6 +27,36 @@ ros2 launch drone_control drone_launch.py \
   pose_model_path:=/path/to/movenet_lightning_int8.tflite
 ```
 
+## Tune Without Rebuild
+
+Launch defaults are loaded from:
+
+```bash
+install/drone_control/share/drone_control/config/drone_settings.yaml
+```
+
+Edit that installed YAML and restart the launch to tune camera FPS, pose
+thresholds, and inference FPS without rebuilding:
+
+```yaml
+camera:
+  color_width: 640
+  color_height: 480
+  color_fps: 5
+
+pose:
+  confidence_threshold: 0.2
+  min_confident_keypoints: 5
+  max_inference_fps: 5.0
+```
+
+You can also keep a separate file and point the launch at it:
+
+```bash
+DRONE_SETTINGS_FILE=/home/andrew/drone_settings.yaml \
+ros2 launch drone_control drone_launch.py start_rosbridge:=true start_camera:=true
+```
+
 Run only the pose node against an existing camera topic:
 
 ```bash
