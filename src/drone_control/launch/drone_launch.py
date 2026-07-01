@@ -19,6 +19,7 @@ def generate_launch_description():
     pose_model_path = LaunchConfiguration('pose_model_path')
     pose_image_topic = LaunchConfiguration('pose_image_topic')
     pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
+    pose_max_inference_fps = LaunchConfiguration('pose_max_inference_fps')
     orbbec_setup = LaunchConfiguration('orbbec_setup')
 
     return LaunchDescription([
@@ -49,8 +50,13 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'pose_confidence_threshold',
-            default_value='0.3',
+            default_value='0.2',
             description='Minimum keypoint confidence used for person detection.',
+        ),
+        DeclareLaunchArgument(
+            'pose_max_inference_fps',
+            default_value='5.0',
+            description='Maximum MoveNet inference rate. Use 0 to process every camera frame.',
         ),
         DeclareLaunchArgument(
             'orbbec_setup',
@@ -76,7 +82,7 @@ def generate_launch_description():
                     'exec ros2 launch orbbec_camera gemini_e.launch.py '
                     'color_width:=640 '
                     'color_height:=480 '
-                    'color_fps:=10 '
+                    'color_fps:=5 '
                     'enable_depth:=false '
                     'depth_width:=640 '
                     'depth_height:=480 '
@@ -97,6 +103,7 @@ def generate_launch_description():
                 'model_path': pose_model_path,
                 'image_topic': pose_image_topic,
                 'confidence_threshold': ParameterValue(pose_confidence_threshold, value_type=float),
+                'max_inference_fps': ParameterValue(pose_max_inference_fps, value_type=float),
             }],
         ),
         Node(

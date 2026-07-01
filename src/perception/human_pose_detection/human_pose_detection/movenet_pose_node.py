@@ -64,13 +64,16 @@ class MovenetPoseNode(Node):
         self.declare_parameter('debug_image_topic', '/human_pose/debug_image')
         self.declare_parameter('confidence_threshold', 0.3)
         self.declare_parameter('min_confident_keypoints', 5)
+        self.declare_parameter('max_inference_fps', 5.0)
         self.declare_parameter('publish_debug_image', True)
 
         self.model_path = os.path.expanduser(self.get_parameter('model_path').value)
         self.image_topic = self.get_parameter('image_topic').value
         self.confidence_threshold = float(self.get_parameter('confidence_threshold').value)
         self.min_confident_keypoints = int(self.get_parameter('min_confident_keypoints').value)
+        self.max_inference_fps = float(self.get_parameter('max_inference_fps').value)
         self.publish_debug_image = bool(self.get_parameter('publish_debug_image').value)
+        self.last_inference_time = None
 
         self._load_model()
 
@@ -93,7 +96,8 @@ class MovenetPoseNode(Node):
 
         self.get_logger().info(
             f'Running MoveNet Lightning INT8 on {self.image_topic}; '
-            f'keypoint threshold={self.confidence_threshold:.2f}'
+            f'keypoint threshold={self.confidence_threshold:.2f}; '
+            f'max inference FPS={self.max_inference_fps:.1f}'
         )
 
     def _load_model(self) -> None:
@@ -123,6 +127,9 @@ class MovenetPoseNode(Node):
         )
 
     def image_callback(self, msg: Image) -> None:
+        if not self.should_process_frame():
+            return
+
         try:
             bgr_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except CvBridgeError as error:
@@ -130,8 +137,8 @@ class MovenetPoseNode(Node):
             return
 
         rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
-        keypoints = self.run_inference(rgb_image)
-        decoded = self.decode_keypoints(keypoints, msg.width, msg.height)
+        keypoints, scale, pad_x, pad_y = self.run_inference(rgb_image)
+        decoded = self.decode_keypoints(keypoints, msg.width, msg.height, scale, pad_x, pad_y)
         bbox = self.bounding_box(decoded)
         detected = bbox is not None
 
@@ -142,11 +149,24 @@ class MovenetPoseNode(Node):
             debug_image = self.draw_debug_image(bgr_image, decoded, bbox)
             self.debug_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
 
-    def run_inference(self, rgb_image: np.ndarray) -> np.ndarray:
-        # MoveNet Lightning expects a square RGB tensor. The model's input tensor
-        # describes whether it wants quantized INT8/UINT8 data or float data.
-        resized = cv2.resize(rgb_image, (self.input_width, self.input_height), interpolation=cv2.INTER_LINEAR)
-        input_tensor = np.expand_dims(resized, axis=0)
+    def should_process_frame(self) -> bool:
+        if self.max_inference_fps <= 0:
+            return True
+
+        now = self.get_clock().now()
+        if self.last_inference_time is not None:
+            elapsed = (now - self.last_inference_time).nanoseconds / 1e9
+            if elapsed < 1.0 / self.max_inference_fps:
+                return False
+        self.last_inference_time = now
+        return True
+
+    def run_inference(self, rgb_image: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
+        # MoveNet Lightning expects a square RGB tensor. Letterboxing preserves
+        # the camera aspect ratio, which usually gives steadier keypoints than
+        # stretching the whole frame into a square.
+        input_image, scale, pad_x, pad_y = self.letterbox(rgb_image)
+        input_tensor = np.expand_dims(input_image, axis=0)
 
         if np.issubdtype(self.input_dtype, np.floating):
             input_tensor = input_tensor.astype(self.input_dtype) / 255.0
@@ -166,15 +186,40 @@ class MovenetPoseNode(Node):
             scale, zero_point = self.output_details.get('quantization', (0.0, 0))
             if scale and scale > 0:
                 output_tensor = (output_tensor.astype(np.float32) - zero_point) * scale
-        return np.squeeze(output_tensor)
+        return np.squeeze(output_tensor), scale, pad_x, pad_y
 
-    def decode_keypoints(self, raw_keypoints: np.ndarray, width: int, height: int) -> List[Tuple[float, float, float]]:
+    def letterbox(self, rgb_image: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
+        height, width = rgb_image.shape[:2]
+        scale = min(self.input_width / float(width), self.input_height / float(height))
+        resized_width = max(1, int(round(width * scale)))
+        resized_height = max(1, int(round(height * scale)))
+        pad_x = (self.input_width - resized_width) // 2
+        pad_y = (self.input_height - resized_height) // 2
+
+        resized = cv2.resize(rgb_image, (resized_width, resized_height), interpolation=cv2.INTER_LINEAR)
+        canvas = np.zeros((self.input_height, self.input_width, 3), dtype=np.uint8)
+        canvas[pad_y:pad_y + resized_height, pad_x:pad_x + resized_width] = resized
+        return canvas, scale, pad_x, pad_y
+
+    def decode_keypoints(
+        self,
+        raw_keypoints: np.ndarray,
+        width: int,
+        height: int,
+        scale: float,
+        pad_x: int,
+        pad_y: int,
+    ) -> List[Tuple[float, float, float]]:
         # MoveNet returns 17 keypoints as normalized [y, x, score].
         keypoints = raw_keypoints.reshape(17, 3)
         decoded = []
         for y_norm, x_norm, score in keypoints:
-            x = float(x_norm) * float(width)
-            y = float(y_norm) * float(height)
+            model_x = float(x_norm) * float(self.input_width)
+            model_y = float(y_norm) * float(self.input_height)
+            x = (model_x - pad_x) / scale
+            y = (model_y - pad_y) / scale
+            x = max(0.0, min(float(width - 1), x))
+            y = max(0.0, min(float(height - 1), y))
             decoded.append((x, y, float(score)))
         return decoded
 
