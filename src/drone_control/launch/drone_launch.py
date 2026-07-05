@@ -29,10 +29,12 @@ def load_settings():
 def generate_launch_description():
     settings = load_settings()
     camera = settings.get('camera', {})
+    thermal_camera = settings.get('thermal_camera', {})
     pose = settings.get('pose', {})
 
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_camera = LaunchConfiguration('start_camera')
+    start_thermal_camera = LaunchConfiguration('start_thermal_camera')
     start_pose = LaunchConfiguration('start_pose')
     pose_model_path = LaunchConfiguration('pose_model_path')
     pose_image_topic = LaunchConfiguration('pose_image_topic')
@@ -41,6 +43,13 @@ def generate_launch_description():
     pose_max_inference_fps = LaunchConfiguration('pose_max_inference_fps')
     pose_publish_debug_image = LaunchConfiguration('pose_publish_debug_image')
     orbbec_setup = LaunchConfiguration('orbbec_setup')
+    thermal_device = LaunchConfiguration('thermal_device')
+    thermal_width = LaunchConfiguration('thermal_width')
+    thermal_height = LaunchConfiguration('thermal_height')
+    thermal_fps = LaunchConfiguration('thermal_fps')
+    thermal_pixel_format = LaunchConfiguration('thermal_pixel_format')
+    thermal_output_encoding = LaunchConfiguration('thermal_output_encoding')
+    thermal_frame_id = LaunchConfiguration('thermal_frame_id')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -52,6 +61,11 @@ def generate_launch_description():
             'start_camera',
             default_value='false',
             description='Start the Orbbec RGB camera driver.',
+        ),
+        DeclareLaunchArgument(
+            'start_thermal_camera',
+            default_value='false',
+            description='Start the V4L2 thermal camera driver.',
         ),
         DeclareLaunchArgument(
             'start_pose',
@@ -96,6 +110,41 @@ def generate_launch_description():
             ),
             description='Path to the Orbbec driver workspace setup.bash.',
         ),
+        DeclareLaunchArgument(
+            'thermal_device',
+            default_value=str(thermal_camera.get('device', '/dev/video0')),
+            description='V4L2 device path for the thermal camera.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_width',
+            default_value=str(thermal_camera.get('width', 256)),
+            description='Thermal camera image width.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_height',
+            default_value=str(thermal_camera.get('height', 192)),
+            description='Thermal camera image height.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_fps',
+            default_value=str(thermal_camera.get('fps', 25)),
+            description='Thermal camera frames per second.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_pixel_format',
+            default_value=str(thermal_camera.get('pixel_format', 'YUYV')),
+            description='V4L2 thermal camera pixel format.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_output_encoding',
+            default_value=str(thermal_camera.get('output_encoding', 'yuv422_yuy2')),
+            description='ROS image encoding published by v4l2_camera.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_frame_id',
+            default_value=str(thermal_camera.get('frame_id', 'thermal_camera_frame')),
+            description='Frame id for thermal camera images.',
+        ),
         ExecuteProcess(
             cmd=[
                 'bash',
@@ -122,6 +171,28 @@ def generate_launch_description():
             ],
             output='screen',
             condition=IfCondition(start_camera),
+        ),
+        Node(
+            package='v4l2_camera',
+            executable='v4l2_camera_node',
+            name='thermal_camera',
+            namespace='thermal',
+            output='screen',
+            condition=IfCondition(start_thermal_camera),
+            parameters=[{
+                'video_device': thermal_device,
+                'image_size': [
+                    ParameterValue(thermal_width, value_type=int),
+                    ParameterValue(thermal_height, value_type=int),
+                ],
+                'time_per_frame': [
+                    1,
+                    ParameterValue(thermal_fps, value_type=int),
+                ],
+                'pixel_format': thermal_pixel_format,
+                'output_encoding': thermal_output_encoding,
+                'camera_frame_id': thermal_frame_id,
+            }],
         ),
         Node(
             package='human_pose_detection',

@@ -12,5 +12,6 @@
   <exec_depend>human_pose_detection</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
+  <exec_depend>v4l2_camera</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

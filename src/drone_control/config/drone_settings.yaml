@@ -8,6 +8,15 @@ camera:
   depth_fps: 5
   enable_ir: false
 
+thermal_camera:
+  device: /dev/video0
+  width: 256
+  height: 192
+  fps: 25
+  pixel_format: YUYV
+  output_encoding: yuv422_yuy2
+  frame_id: thermal_camera_frame
+
 pose:
   image_topic: /camera/color/image_raw
   confidence_threshold: 0.4

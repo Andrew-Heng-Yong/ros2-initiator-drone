@@ -15,6 +15,11 @@ source install/setup.bash
 ```
 
 The pose node needs `cv_bridge`, OpenCV, and either `tflite_runtime` or TensorFlow Lite support available in the Python environment.
+The thermal camera launch path needs `v4l2_camera`:
+
+```bash
+sudo apt install ros-jazzy-v4l2-camera
+```
 
 ## Launch
 
@@ -25,6 +30,16 @@ ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
   start_camera:=true \
   pose_model_path:=/path/to/movenet_lightning_int8.tflite
+```
+
+Run only the 256x192 YUYV thermal camera and rosbridge:
+
+```bash
+ros2 launch drone_control drone_launch.py \
+  start_rosbridge:=true \
+  start_camera:=false \
+  start_pose:=false \
+  start_thermal_camera:=true
 ```
 
 ## Tune Without Rebuild
@@ -48,6 +63,14 @@ pose:
   confidence_threshold: 0.2
   min_confident_keypoints: 5
   max_inference_fps: 5.0
+
+thermal_camera:
+  device: /dev/video0
+  width: 256
+  height: 192
+  fps: 25
+  pixel_format: YUYV
+  output_encoding: yuv422_yuy2
 ```
 
 You can also keep a separate file and point the launch at it:
@@ -71,3 +94,8 @@ ros2 launch human_pose_detection movenet_pose_launch.py \
 - Keypoints: `/human_pose/keypoints`
 - Detection flag: `/human_pose/person_detected`
 - Debug image: `/human_pose/debug_image`
+
+## Thermal Topics
+
+- Image: `/thermal/image_raw`
+- Camera info: `/thermal/camera_info`
