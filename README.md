@@ -73,9 +73,9 @@ thermal_camera:
   output_encoding: yuv422_yuy2
 ```
 
-Some HikCamera-style thermal UVC devices expose the usable 256x192 thermal image
-inside a native 256x392 YUYV frame. The dashboard crops the lower thermal region
-for display.
+Some HikCamera-style thermal UVC devices expose the real 256x192 sensor image
+inside a native 256x392 YUYV transport frame. The dashboard crops that transport
+frame and displays the 256x192 thermal image.
 
 You can also keep a separate file and point the launch at it:
 
