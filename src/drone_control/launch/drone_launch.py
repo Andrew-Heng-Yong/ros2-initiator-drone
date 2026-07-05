@@ -9,7 +9,7 @@ import yaml
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
@@ -50,6 +50,30 @@ def generate_launch_description():
     thermal_pixel_format = LaunchConfiguration('thermal_pixel_format')
     thermal_output_encoding = LaunchConfiguration('thermal_output_encoding')
     thermal_frame_id = LaunchConfiguration('thermal_frame_id')
+
+    def create_thermal_camera_node(context):
+        return [Node(
+            package='v4l2_camera',
+            executable='v4l2_camera_node',
+            name='thermal_camera',
+            namespace='thermal',
+            output='screen',
+            condition=IfCondition(start_thermal_camera),
+            parameters=[{
+                'video_device': thermal_device.perform(context),
+                'image_size': [
+                    int(thermal_width.perform(context)),
+                    int(thermal_height.perform(context)),
+                ],
+                'time_per_frame': [
+                    1,
+                    int(thermal_fps.perform(context)),
+                ],
+                'pixel_format': thermal_pixel_format.perform(context),
+                'output_encoding': thermal_output_encoding.perform(context),
+                'camera_frame_id': thermal_frame_id.perform(context),
+            }],
+        )]
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -172,28 +196,7 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(start_camera),
         ),
-        Node(
-            package='v4l2_camera',
-            executable='v4l2_camera_node',
-            name='thermal_camera',
-            namespace='thermal',
-            output='screen',
-            condition=IfCondition(start_thermal_camera),
-            parameters=[{
-                'video_device': thermal_device,
-                'image_size': [
-                    ParameterValue(thermal_width, value_type=int),
-                    ParameterValue(thermal_height, value_type=int),
-                ],
-                'time_per_frame': [
-                    1,
-                    ParameterValue(thermal_fps, value_type=int),
-                ],
-                'pixel_format': thermal_pixel_format,
-                'output_encoding': thermal_output_encoding,
-                'camera_frame_id': thermal_frame_id,
-            }],
-        ),
+        OpaqueFunction(function=create_thermal_camera_node),
         Node(
             package='human_pose_detection',
             executable='movenet_pose_node',
