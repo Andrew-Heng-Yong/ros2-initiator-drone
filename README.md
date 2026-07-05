@@ -67,11 +67,15 @@ pose:
 thermal_camera:
   device: /dev/video0
   width: 256
-  height: 192
+  height: 392
   fps: 25
   pixel_format: YUYV
   output_encoding: yuv422_yuy2
 ```
+
+Some HikCamera-style thermal UVC devices expose the usable 256x192 thermal image
+inside a native 256x392 YUYV frame. The dashboard crops the lower thermal region
+for display.
 
 You can also keep a separate file and point the launch at it:
 
