@@ -76,8 +76,8 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts color at 640x480 10 fps and leaves depth disabled.
-Test the same settings manually:
+The drone launch file starts color and depth at 640x480. Test the same settings
+manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -86,7 +86,7 @@ ros2 launch orbbec_camera gemini_e.launch.py \
   color_width:=640 \
   color_height:=480 \
   color_fps:=10 \
-  enable_depth:=false \
+  enable_depth:=true \
   depth_width:=640 \
   depth_height:=480 \
   depth_fps:=10 \
@@ -98,31 +98,7 @@ Verify topics:
 ```bash
 ros2 topic list | grep -E "camera|image|camera_info"
 ros2 topic hz /camera/color/image_raw
-```
-
-## Dashboard Pose Debug Stream
-
-The dashboard renders `/human_pose/debug_image`, which is produced by the
-RGB-only MoveNet pose node from `/camera/color/image_raw`. Source both the
-Orbbec workspace and the drone workspace, then start the camera explicitly.
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source ~/orbbec_ws/install/setup.bash
-source ~/ros2-initiator-drone/install/setup.bash
-ros2 launch drone_control drone_launch.py \
-  start_rosbridge:=true \
-  start_camera:=true \
-  pose_model_path:=/path/to/movenet_lightning_int8.tflite
-```
-
-The pose stack uses:
-
-```text
-input:  /camera/color/image_raw
-output: /human_pose/keypoints
-output: /human_pose/person_detected
-output: /human_pose/debug_image
+ros2 topic hz /camera/depth/image_raw
 ```
 
 ## Troubleshooting

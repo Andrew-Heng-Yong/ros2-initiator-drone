@@ -2,7 +2,7 @@ camera:
   color_width: 640
   color_height: 480
   color_fps: 5
-  enable_depth: false
+  enable_depth: true
   depth_width: 640
   depth_height: 480
   depth_fps: 5
@@ -16,10 +16,3 @@ thermal_camera:
   pixel_format: YUYV
   output_encoding: yuv422_yuy2
   frame_id: thermal_camera_frame
-
-pose:
-  image_topic: /camera/color/image_raw
-  confidence_threshold: 0.4
-  min_confident_keypoints: 7
-  max_inference_fps: 2.0
-  publish_debug_image: true

@@ -13,7 +13,6 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def load_settings():
@@ -30,18 +29,10 @@ def generate_launch_description():
     settings = load_settings()
     camera = settings.get('camera', {})
     thermal_camera = settings.get('thermal_camera', {})
-    pose = settings.get('pose', {})
 
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_camera = LaunchConfiguration('start_camera')
     start_thermal_camera = LaunchConfiguration('start_thermal_camera')
-    start_pose = LaunchConfiguration('start_pose')
-    pose_model_path = LaunchConfiguration('pose_model_path')
-    pose_image_topic = LaunchConfiguration('pose_image_topic')
-    pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
-    pose_min_confident_keypoints = LaunchConfiguration('pose_min_confident_keypoints')
-    pose_max_inference_fps = LaunchConfiguration('pose_max_inference_fps')
-    pose_publish_debug_image = LaunchConfiguration('pose_publish_debug_image')
     orbbec_setup = LaunchConfiguration('orbbec_setup')
     thermal_device = LaunchConfiguration('thermal_device')
     thermal_width = LaunchConfiguration('thermal_width')
@@ -84,47 +75,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_camera',
             default_value='false',
-            description='Start the Orbbec RGB camera driver.',
+            description='Start the Orbbec RGB/depth camera driver.',
         ),
         DeclareLaunchArgument(
             'start_thermal_camera',
             default_value='false',
             description='Start the V4L2 thermal camera driver.',
-        ),
-        DeclareLaunchArgument(
-            'start_pose',
-            default_value='true',
-            description='Start the RGB-only MoveNet human pose detection node.',
-        ),
-        DeclareLaunchArgument(
-            'pose_model_path',
-            default_value='',
-            description='Path to the MoveNet Lightning INT8 TensorFlow Lite model.',
-        ),
-        DeclareLaunchArgument(
-            'pose_image_topic',
-            default_value=str(pose.get('image_topic', '/camera/color/image_raw')),
-            description='RGB image topic consumed by the pose detector.',
-        ),
-        DeclareLaunchArgument(
-            'pose_confidence_threshold',
-            default_value=str(pose.get('confidence_threshold', 0.2)),
-            description='Minimum keypoint confidence used for person detection.',
-        ),
-        DeclareLaunchArgument(
-            'pose_min_confident_keypoints',
-            default_value=str(pose.get('min_confident_keypoints', 5)),
-            description='Minimum keypoints above threshold required to call a person detected.',
-        ),
-        DeclareLaunchArgument(
-            'pose_max_inference_fps',
-            default_value=str(pose.get('max_inference_fps', 5.0)),
-            description='Maximum MoveNet inference rate. Use 0 to process every camera frame.',
-        ),
-        DeclareLaunchArgument(
-            'pose_publish_debug_image',
-            default_value=str(pose.get('publish_debug_image', True)).lower(),
-            description='Publish annotated pose debug image.',
         ),
         DeclareLaunchArgument(
             'orbbec_setup',
@@ -186,7 +142,7 @@ def generate_launch_description():
                     f'color_width:={int(camera.get("color_width", 640))} '
                     f'color_height:={int(camera.get("color_height", 480))} '
                     f'color_fps:={int(camera.get("color_fps", 5))} '
-                    f'enable_depth:={str(camera.get("enable_depth", False)).lower()} '
+                    f'enable_depth:={str(camera.get("enable_depth", True)).lower()} '
                     f'depth_width:={int(camera.get("depth_width", 640))} '
                     f'depth_height:={int(camera.get("depth_height", 480))} '
                     f'depth_fps:={int(camera.get("depth_fps", 10))} '
@@ -197,21 +153,6 @@ def generate_launch_description():
             condition=IfCondition(start_camera),
         ),
         OpaqueFunction(function=create_thermal_camera_node),
-        Node(
-            package='human_pose_detection',
-            executable='movenet_pose_node',
-            name='movenet_pose_node',
-            output='screen',
-            condition=IfCondition(start_pose),
-            parameters=[{
-                'model_path': pose_model_path,
-                'image_topic': pose_image_topic,
-                'confidence_threshold': ParameterValue(pose_confidence_threshold, value_type=float),
-                'min_confident_keypoints': ParameterValue(pose_min_confident_keypoints, value_type=int),
-                'max_inference_fps': ParameterValue(pose_max_inference_fps, value_type=float),
-                'publish_debug_image': ParameterValue(pose_publish_debug_image, value_type=bool),
-            }],
-        ),
         Node(
             package='rosbridge_server',
             executable='rosbridge_websocket',
