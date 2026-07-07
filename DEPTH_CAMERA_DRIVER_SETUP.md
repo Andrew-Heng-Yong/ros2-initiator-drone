@@ -76,7 +76,9 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts color at 640x480 10 fps and leaves depth disabled.
+The drone launch file starts color at 640x360 5 fps and leaves depth disabled.
+The human tracker then removes 29 px from each side and runs on the 582x360
+center crop.
 Test the same settings manually:
 
 ```bash
@@ -84,8 +86,8 @@ source /opt/ros/jazzy/setup.bash
 source ~/orbbec_ws/install/setup.bash
 ros2 launch orbbec_camera gemini_e.launch.py \
   color_width:=640 \
-  color_height:=480 \
-  color_fps:=10 \
+  color_height:=360 \
+  color_fps:=5 \
   enable_depth:=false \
   depth_width:=640 \
   depth_height:=480 \

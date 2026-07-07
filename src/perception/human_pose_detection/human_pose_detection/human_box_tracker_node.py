@@ -40,6 +40,10 @@ class HumanBoxTrackerNode(Node):
         self.declare_parameter('debug_image_topic', '/human_pose/debug_image')
         self.declare_parameter('confidence_threshold', 0.35)
         self.declare_parameter('max_detections', 8)
+        self.declare_parameter('crop_left_px', 29)
+        self.declare_parameter('crop_right_px', 29)
+        self.declare_parameter('crop_top_px', 0)
+        self.declare_parameter('crop_bottom_px', 0)
         self.declare_parameter('track_iou_threshold', 0.3)
         self.declare_parameter('max_track_missed_frames', 5)
         self.declare_parameter('max_inference_fps', 5.0)
@@ -50,6 +54,10 @@ class HumanBoxTrackerNode(Node):
         self.image_topic = self.get_parameter('image_topic').value
         self.confidence_threshold = float(self.get_parameter('confidence_threshold').value)
         self.max_detections = int(self.get_parameter('max_detections').value)
+        self.crop_left_px = int(self.get_parameter('crop_left_px').value)
+        self.crop_right_px = int(self.get_parameter('crop_right_px').value)
+        self.crop_top_px = int(self.get_parameter('crop_top_px').value)
+        self.crop_bottom_px = int(self.get_parameter('crop_bottom_px').value)
         self.track_iou_threshold = float(self.get_parameter('track_iou_threshold').value)
         self.max_track_missed_frames = int(self.get_parameter('max_track_missed_frames').value)
         self.max_inference_fps = float(self.get_parameter('max_inference_fps').value)
@@ -80,6 +88,8 @@ class HumanBoxTrackerNode(Node):
         self.get_logger().info(
             f'Running {self.model_name} on {self.image_topic}; '
             f'box threshold={self.confidence_threshold:.2f}; '
+            f'crop left/right/top/bottom='
+            f'{self.crop_left_px}/{self.crop_right_px}/{self.crop_top_px}/{self.crop_bottom_px}; '
             f'max detections={self.max_detections}; '
             f'max inference FPS={self.max_inference_fps:.1f}'
         )
@@ -120,9 +130,11 @@ class HumanBoxTrackerNode(Node):
             self.get_logger().warn(f'Unsupported camera image format: {error}')
             return
 
-        rgb_image = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
+        cropped_bgr = self.crop_image(bgr_image)
+        crop_height, crop_width = cropped_bgr.shape[:2]
+        rgb_image = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2RGB)
         try:
-            boxes = self.run_inference(rgb_image, msg.width, msg.height)
+            boxes = self.run_inference(rgb_image, crop_width, crop_height)
             tracked_boxes = self.update_tracks(boxes)
         except Exception as error:
             self.get_logger().warn(f'Box inference failed for this frame: {error}')
@@ -133,8 +145,20 @@ class HumanBoxTrackerNode(Node):
         self.detected_pub.publish(Bool(data=detected))
 
         if self.publish_debug_image:
-            debug_image = self.draw_debug_image(bgr_image, tracked_boxes)
+            debug_image = self.draw_debug_image(cropped_bgr, tracked_boxes)
             self.debug_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
+
+    def crop_image(self, image: np.ndarray) -> np.ndarray:
+        height, width = image.shape[:2]
+        left = max(0, min(width - 1, self.crop_left_px))
+        right = max(0, min(width - left - 1, self.crop_right_px))
+        top = max(0, min(height - 1, self.crop_top_px))
+        bottom = max(0, min(height - top - 1, self.crop_bottom_px))
+        cropped = image[top:height - bottom, left:width - right]
+        if cropped.size == 0:
+            self.get_logger().warn('Configured RGB crop is empty; using full frame.')
+            return image
+        return cropped
 
     def should_process_frame(self) -> bool:
         if self.max_inference_fps <= 0:

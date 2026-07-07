@@ -5,22 +5,22 @@ uses a lightweight person-box detector so multiple humans can be marked in the
 debug stream. The old MoveNet pose node remains in the package for archive and
 fallback use.
 
-No thermal camera, MLX90640 data, depth fusion, or multi-sensor confidence logic is used.
-
 ## Run
 
 ```bash
 ros2 launch human_pose_detection movenet_pose_launch.py \
-  model_path:=/path/to/efficientdet_lite0.tflite \
-  image_topic:=/camera/image_raw
+  params_file:=/path/to/human_box_tracker.yaml
 ```
 
-The default model selection is hardcoded in launch parameters:
+The default model selection is in the installed ROS parameter file:
 
-- `model_name:=efficientdet_lite0_person_boxes`
-- `model_path:=/home/andrew/models/efficientdet_lite0.tflite`
+- `share/human_pose_detection/config/human_box_tracker.yaml`
+- `model_name: efficientdet_lite0_person_boxes`
+- `model_path: /home/andrew/models/efficientdet_lite0.tflite`
 
-The top-level drone launch uses `/camera/color/image_raw` by default:
+The top-level drone launch uses `/camera/color/image_raw` by default, captures
+RGB at 640x360, and runs detection on a 582x360 center crop after removing 29 px
+from each side:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
@@ -30,7 +30,7 @@ ros2 launch drone_control drone_launch.py \
 
 ## Topics
 
-- Subscribes: `/camera/image_raw` by default, configurable with `image_topic`
+- Subscribes: `/camera/color/image_raw` by default, configurable in `human_box_tracker.yaml`
 - Publishes boxes: `/human_pose/keypoints`
 - Publishes detection flag: `/human_pose/person_detected`
 - Publishes annotated image: `/human_pose/debug_image`
