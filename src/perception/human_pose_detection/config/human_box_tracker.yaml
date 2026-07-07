@@ -1,7 +1,7 @@
 human_box_tracker_node:
   ros__parameters:
     model_name: efficientdet_lite0_person_boxes
-    model_path: /home/andrew/models/efficientdet_lite0.tflite
+    model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite
     image_topic: /camera/color/image_raw
     boxes_topic: /human_pose/keypoints
     person_detected_topic: /human_pose/person_detected
@@ -16,3 +16,4 @@ human_box_tracker_node:
     max_track_missed_frames: 5
     max_inference_fps: 2.0
     publish_debug_image: true
+    allow_missing_model_debug_stream: true

@@ -27,8 +27,8 @@ def main():
     if not args.model or not os.path.isfile(os.path.expanduser(args.model)):
         print(
             'Missing human box model file. Put the EfficientDet Lite0 .tflite at '
-            '~/models/efficientdet_lite0.tflite, or set human_tracking_model_path '
-            'to the real file path.'
+            '~/ros2-initiator-drone/models/efficientdet_lite0.tflite, set '
+            'HUMAN_BOX_MODEL_PATH, or update human_box_tracker.yaml to the real file path.'
         )
         return 1
 

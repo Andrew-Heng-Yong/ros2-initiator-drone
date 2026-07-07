@@ -25,6 +25,18 @@ except ImportError:
 
 
 COCO_PERSON_CLASS_IDS = {0, 1}
+MODEL_PATH_ENV = 'HUMAN_BOX_MODEL_PATH'
+COMMON_MODEL_PATHS = (
+    '/home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite',
+    '/home/andrew/ros2-initiator-drone/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
+    '/home/andrew/ros2-initiator-drone/models/ssd_mobilenet_v1_1_metadata_1.tflite',
+    '/home/andrew/models/efficientdet_lite0.tflite',
+    '/home/andrew/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
+    '/home/andrew/models/ssd_mobilenet_v1_1_metadata_1.tflite',
+    '~/models/efficientdet_lite0.tflite',
+    '~/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
+    '~/models/ssd_mobilenet_v1_1_metadata_1.tflite',
+)
 
 
 class HumanBoxTrackerNode(Node):
@@ -48,6 +60,7 @@ class HumanBoxTrackerNode(Node):
         self.declare_parameter('max_track_missed_frames', 5)
         self.declare_parameter('max_inference_fps', 5.0)
         self.declare_parameter('publish_debug_image', True)
+        self.declare_parameter('allow_missing_model_debug_stream', True)
 
         self.model_path = os.path.expanduser(self.get_parameter('model_path').value)
         self.model_name = self.get_parameter('model_name').value
@@ -62,9 +75,14 @@ class HumanBoxTrackerNode(Node):
         self.max_track_missed_frames = int(self.get_parameter('max_track_missed_frames').value)
         self.max_inference_fps = float(self.get_parameter('max_inference_fps').value)
         self.publish_debug_image = bool(self.get_parameter('publish_debug_image').value)
+        self.allow_missing_model_debug_stream = bool(
+            self.get_parameter('allow_missing_model_debug_stream').value
+        )
         self.last_inference_time = None
         self.next_track_id = 1
         self.tracks: List[Dict[str, float]] = []
+        self.model_error: Optional[str] = None
+        self.interpreter = None
 
         self._load_model()
 
@@ -96,13 +114,17 @@ class HumanBoxTrackerNode(Node):
 
     def _load_model(self) -> None:
         if Interpreter is None:
-            raise RuntimeError(
+            self.handle_model_error(
                 'Install a TensorFlow Lite interpreter: tflite_runtime, ai-edge-litert, or tensorflow.'
             )
+            return
+
+        self.model_path = self.resolve_model_path(self.model_path)
         if not self.model_path:
-            raise RuntimeError('model_path parameter is required.')
-        if not os.path.isfile(self.model_path):
-            raise RuntimeError(f'Human box model file not found: {self.model_path}')
+            self.handle_model_error(
+                f'Human box model file not found. Set model_path or {MODEL_PATH_ENV}.'
+            )
+            return
 
         self.interpreter = Interpreter(model_path=self.model_path, num_threads=2)
         self.interpreter.allocate_tensors()
@@ -120,6 +142,32 @@ class HumanBoxTrackerNode(Node):
             f'{self.input_dtype}'
         )
 
+    def resolve_model_path(self, configured_path: str) -> str:
+        candidates = []
+        env_path = os.environ.get(MODEL_PATH_ENV, '')
+        if env_path:
+            candidates.append(env_path)
+        if configured_path:
+            candidates.append(configured_path)
+        candidates.extend(COMMON_MODEL_PATHS)
+
+        for candidate in candidates:
+            expanded = os.path.expanduser(candidate)
+            if os.path.isfile(expanded):
+                if expanded != configured_path:
+                    self.get_logger().info(f'Using human box model: {expanded}')
+                return expanded
+        return ''
+
+    def handle_model_error(self, message: str) -> None:
+        if not self.allow_missing_model_debug_stream:
+            raise RuntimeError(message)
+        self.model_error = message
+        self.get_logger().error(message)
+        self.get_logger().warn(
+            'Continuing without detector so /human_pose/debug_image still shows the cropped RGB stream.'
+        )
+
     def image_callback(self, msg: Image) -> None:
         if not self.should_process_frame():
             return
@@ -132,6 +180,15 @@ class HumanBoxTrackerNode(Node):
 
         cropped_bgr = self.crop_image(bgr_image)
         crop_height, crop_width = cropped_bgr.shape[:2]
+
+        if self.interpreter is None:
+            self.publish_result([])
+            self.detected_pub.publish(Bool(data=False))
+            if self.publish_debug_image:
+                debug_image = self.draw_missing_model_image(cropped_bgr)
+                self.debug_pub.publish(self.bridge.cv2_to_imgmsg(debug_image, encoding='bgr8'))
+            return
+
         rgb_image = cv2.cvtColor(cropped_bgr, cv2.COLOR_BGR2RGB)
         try:
             boxes = self.run_inference(rgb_image, crop_width, crop_height)
@@ -159,6 +216,22 @@ class HumanBoxTrackerNode(Node):
             self.get_logger().warn('Configured RGB crop is empty; using full frame.')
             return image
         return cropped
+
+    def draw_missing_model_image(self, image: np.ndarray) -> np.ndarray:
+        output = image.copy()
+        message = self.model_error or 'Human box model missing.'
+        cv2.rectangle(output, (8, 8), (min(output.shape[1] - 1, 574), 58), (0, 0, 0), -1)
+        cv2.putText(
+            output,
+            message[:80],
+            (16, 38),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.48,
+            (48, 145, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        return output
 
     def should_process_frame(self) -> bool:
         if self.max_inference_fps <= 0:

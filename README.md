@@ -55,7 +55,7 @@ camera:
 human_box_tracker_node:
   ros__parameters:
     model_name: efficientdet_lite0_person_boxes
-    model_path: /home/andrew/models/efficientdet_lite0.tflite
+    model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite
     image_topic: /camera/color/image_raw
     confidence_threshold: 0.35
     max_detections: 8
