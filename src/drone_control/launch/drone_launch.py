@@ -62,7 +62,13 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'bash', '-lc',
-                'ros2 topic echo --once /camera/color/image_raw > /dev/null && '
+                'for attempt in $(seq 1 30); do '
+                'ros2 topic info /camera/color/image_raw > /dev/null 2>&1 && break; '
+                'echo "Waiting for RGB topic /camera/color/image_raw..."; '
+                'sleep 1; '
+                'done; '
+                'ros2 topic info /camera/color/image_raw > /dev/null 2>&1 || '
+                '(echo "Timed out waiting for RGB topic /camera/color/image_raw"; exit 1); '
                 f'exec ros2 run mlx90640_node mlx90640_node --ros-args '
                 f'--params-file "{mlx90640_params}"',
             ],
