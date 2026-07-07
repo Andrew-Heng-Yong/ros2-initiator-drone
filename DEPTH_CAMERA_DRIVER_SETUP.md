@@ -100,10 +100,10 @@ ros2 topic list | grep -E "camera|image|camera_info"
 ros2 topic hz /camera/color/image_raw
 ```
 
-## Dashboard Pose Debug Stream
+## Dashboard Human Tracking Debug Stream
 
 The dashboard renders `/human_pose/debug_image`, which is produced by the
-RGB-only MoveNet pose node from `/camera/color/image_raw`. Source both the
+RGB-only TensorFlow Lite human box tracker from `/camera/color/image_raw`. Source both the
 Orbbec workspace and the drone workspace, then start the camera explicitly.
 
 ```bash
@@ -112,15 +112,14 @@ source ~/orbbec_ws/install/setup.bash
 source ~/ros2-initiator-drone/install/setup.bash
 ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
-  start_camera:=true \
-  pose_model_path:=/path/to/movenet_lightning_int8.tflite
+  start_camera:=true
 ```
 
-The pose stack uses:
+The human tracking stack uses:
 
 ```text
 input:  /camera/color/image_raw
-output: /human_pose/keypoints
+output: /human_pose/keypoints  # box payload for compatibility with older frontend wiring
 output: /human_pose/person_detected
 output: /human_pose/debug_image
 ```

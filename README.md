@@ -3,7 +3,7 @@
 This workspace is split into a top-level launch package and perception packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
-- `src/perception/human_pose_detection`: RGB-only MoveNet Lightning INT8 human pose detection.
+- `src/perception/human_pose_detection`: RGB-only TensorFlow Lite human box tracking.
 
 ## Build
 
@@ -14,8 +14,8 @@ colcon build --packages-up-to drone_control
 source install/setup.bash
 ```
 
-The pose node needs `cv_bridge`, OpenCV, and either `tflite_runtime` or TensorFlow Lite support available in the Python environment.
-The thermal camera launch path needs `v4l2_camera`:
+The human tracker needs `cv_bridge`, OpenCV, and either `tflite_runtime` or TensorFlow Lite support available in the Python environment.
+The archived thermal camera launch path needs `v4l2_camera`:
 
 ```bash
 sudo apt install ros-jazzy-v4l2-camera
@@ -23,16 +23,15 @@ sudo apt install ros-jazzy-v4l2-camera
 
 ## Launch
 
-Run the RGB camera, MoveNet pose node, and rosbridge:
+Run the RGB camera, human box tracker, and rosbridge:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
-  start_camera:=true \
-  pose_model_path:=/path/to/movenet_lightning_int8.tflite
+  start_camera:=true
 ```
 
-Run only the 256x192 YUYV thermal camera and rosbridge:
+Run only the archived 256x192 YUYV thermal camera and rosbridge:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
@@ -50,8 +49,8 @@ Launch defaults are loaded from:
 install/drone_control/share/drone_control/config/drone_settings.yaml
 ```
 
-Edit that installed YAML and restart the launch to tune camera FPS, pose
-thresholds, and inference FPS without rebuilding:
+Edit that installed YAML and restart the launch to tune camera FPS, human
+tracking thresholds, and inference FPS without rebuilding:
 
 ```yaml
 camera:
@@ -59,12 +58,16 @@ camera:
   color_height: 480
   color_fps: 5
 
-pose:
-  confidence_threshold: 0.2
-  min_confident_keypoints: 5
+human_tracking:
+  model_name: efficientdet_lite0_person_boxes
+  model_path: /home/andrew/models/efficientdet_lite0.tflite
+  confidence_threshold: 0.35
+  max_detections: 8
+  track_iou_threshold: 0.3
+  max_track_missed_frames: 5
   max_inference_fps: 5.0
 
-thermal_camera:
+archived_thermal_camera:
   device: /dev/video0
   width: 256
   height: 392
@@ -73,7 +76,7 @@ thermal_camera:
   output_encoding: yuv422_yuy2
 ```
 
-Some HikCamera-style thermal UVC devices expose the real 256x192 sensor image
+Archived HikCamera-style thermal UVC devices expose the real 256x192 sensor image
 inside a native 256x392 YUYV transport frame. The dashboard crops that transport
 frame and displays the 256x192 thermal image.
 
@@ -84,22 +87,22 @@ DRONE_SETTINGS_FILE=/home/andrew/drone_settings.yaml \
 ros2 launch drone_control drone_launch.py start_rosbridge:=true start_camera:=true
 ```
 
-Run only the pose node against an existing camera topic:
+Run only the human box tracker against an existing camera topic:
 
 ```bash
 ros2 launch human_pose_detection movenet_pose_launch.py \
-  model_path:=/path/to/movenet_lightning_int8.tflite \
+  model_path:=/path/to/efficientdet_lite0.tflite \
   image_topic:=/camera/image_raw
 ```
 
-## Pose Topics
+## Human Tracking Topics
 
 - Input image: `/camera/image_raw` by default, `/camera/color/image_raw` in the top-level drone launch
-- Keypoints: `/human_pose/keypoints`
+- Boxes: `/human_pose/keypoints`
 - Detection flag: `/human_pose/person_detected`
 - Debug image: `/human_pose/debug_image`
 
-## Thermal Topics
+## Archived Thermal Topics
 
 - Image: `/thermal/image_raw`
 - Camera info: `/thermal/camera_info`

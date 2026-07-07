@@ -29,19 +29,22 @@ def load_settings():
 def generate_launch_description():
     settings = load_settings()
     camera = settings.get('camera', {})
-    thermal_camera = settings.get('thermal_camera', {})
-    pose = settings.get('pose', {})
+    thermal_camera = settings.get('archived_thermal_camera', settings.get('thermal_camera', {}))
+    human_tracking = settings.get('human_tracking', settings.get('pose', {}))
 
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_camera = LaunchConfiguration('start_camera')
     start_thermal_camera = LaunchConfiguration('start_thermal_camera')
     start_pose = LaunchConfiguration('start_pose')
-    pose_model_path = LaunchConfiguration('pose_model_path')
-    pose_image_topic = LaunchConfiguration('pose_image_topic')
-    pose_confidence_threshold = LaunchConfiguration('pose_confidence_threshold')
-    pose_min_confident_keypoints = LaunchConfiguration('pose_min_confident_keypoints')
-    pose_max_inference_fps = LaunchConfiguration('pose_max_inference_fps')
-    pose_publish_debug_image = LaunchConfiguration('pose_publish_debug_image')
+    human_tracking_model_path = LaunchConfiguration('human_tracking_model_path')
+    human_tracking_model_name = LaunchConfiguration('human_tracking_model_name')
+    human_tracking_image_topic = LaunchConfiguration('human_tracking_image_topic')
+    human_tracking_confidence_threshold = LaunchConfiguration('human_tracking_confidence_threshold')
+    human_tracking_max_detections = LaunchConfiguration('human_tracking_max_detections')
+    human_tracking_track_iou_threshold = LaunchConfiguration('human_tracking_track_iou_threshold')
+    human_tracking_max_track_missed_frames = LaunchConfiguration('human_tracking_max_track_missed_frames')
+    human_tracking_max_inference_fps = LaunchConfiguration('human_tracking_max_inference_fps')
+    human_tracking_publish_debug_image = LaunchConfiguration('human_tracking_publish_debug_image')
     orbbec_setup = LaunchConfiguration('orbbec_setup')
     thermal_device = LaunchConfiguration('thermal_device')
     thermal_width = LaunchConfiguration('thermal_width')
@@ -89,42 +92,57 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_thermal_camera',
             default_value='false',
-            description='Start the V4L2 thermal camera driver.',
+            description='Start the archived V4L2 thermal camera driver.',
         ),
         DeclareLaunchArgument(
             'start_pose',
             default_value='true',
-            description='Start the RGB-only MoveNet human pose detection node.',
+            description='Start the RGB-only TensorFlow Lite human box tracker.',
         ),
         DeclareLaunchArgument(
-            'pose_model_path',
-            default_value='',
-            description='Path to the MoveNet Lightning INT8 TensorFlow Lite model.',
+            'human_tracking_model_path',
+            default_value=str(human_tracking.get('model_path', '/home/andrew/models/efficientdet_lite0.tflite')),
+            description='Hardcoded path to the ultra-light TensorFlow Lite person-box model.',
         ),
         DeclareLaunchArgument(
-            'pose_image_topic',
-            default_value=str(pose.get('image_topic', '/camera/color/image_raw')),
-            description='RGB image topic consumed by the pose detector.',
+            'human_tracking_model_name',
+            default_value=str(human_tracking.get('model_name', 'efficientdet_lite0_person_boxes')),
+            description='Hardcoded model selection for the TensorFlow Lite human box tracker.',
         ),
         DeclareLaunchArgument(
-            'pose_confidence_threshold',
-            default_value=str(pose.get('confidence_threshold', 0.2)),
-            description='Minimum keypoint confidence used for person detection.',
+            'human_tracking_image_topic',
+            default_value=str(human_tracking.get('image_topic', '/camera/color/image_raw')),
+            description='RGB image topic consumed by the human box tracker.',
         ),
         DeclareLaunchArgument(
-            'pose_min_confident_keypoints',
-            default_value=str(pose.get('min_confident_keypoints', 5)),
-            description='Minimum keypoints above threshold required to call a person detected.',
+            'human_tracking_confidence_threshold',
+            default_value=str(human_tracking.get('confidence_threshold', 0.35)),
+            description='Minimum person box confidence used for detection.',
         ),
         DeclareLaunchArgument(
-            'pose_max_inference_fps',
-            default_value=str(pose.get('max_inference_fps', 5.0)),
-            description='Maximum MoveNet inference rate. Use 0 to process every camera frame.',
+            'human_tracking_max_detections',
+            default_value=str(human_tracking.get('max_detections', 8)),
+            description='Maximum human boxes to publish per frame.',
         ),
         DeclareLaunchArgument(
-            'pose_publish_debug_image',
-            default_value=str(pose.get('publish_debug_image', True)).lower(),
-            description='Publish annotated pose debug image.',
+            'human_tracking_track_iou_threshold',
+            default_value=str(human_tracking.get('track_iou_threshold', 0.3)),
+            description='Minimum box overlap used to keep a tracked human id.',
+        ),
+        DeclareLaunchArgument(
+            'human_tracking_max_track_missed_frames',
+            default_value=str(human_tracking.get('max_track_missed_frames', 5)),
+            description='Frames a tracked human can be missing before its id is retired.',
+        ),
+        DeclareLaunchArgument(
+            'human_tracking_max_inference_fps',
+            default_value=str(human_tracking.get('max_inference_fps', 5.0)),
+            description='Maximum box-tracker inference rate. Use 0 to process every camera frame.',
+        ),
+        DeclareLaunchArgument(
+            'human_tracking_publish_debug_image',
+            default_value=str(human_tracking.get('publish_debug_image', True)).lower(),
+            description='Publish annotated human box debug image.',
         ),
         DeclareLaunchArgument(
             'orbbec_setup',
@@ -199,17 +217,20 @@ def generate_launch_description():
         OpaqueFunction(function=create_thermal_camera_node),
         Node(
             package='human_pose_detection',
-            executable='movenet_pose_node',
-            name='movenet_pose_node',
+            executable='human_box_tracker_node',
+            name='human_box_tracker_node',
             output='screen',
             condition=IfCondition(start_pose),
             parameters=[{
-                'model_path': pose_model_path,
-                'image_topic': pose_image_topic,
-                'confidence_threshold': ParameterValue(pose_confidence_threshold, value_type=float),
-                'min_confident_keypoints': ParameterValue(pose_min_confident_keypoints, value_type=int),
-                'max_inference_fps': ParameterValue(pose_max_inference_fps, value_type=float),
-                'publish_debug_image': ParameterValue(pose_publish_debug_image, value_type=bool),
+                'model_path': human_tracking_model_path,
+                'model_name': human_tracking_model_name,
+                'image_topic': human_tracking_image_topic,
+                'confidence_threshold': ParameterValue(human_tracking_confidence_threshold, value_type=float),
+                'max_detections': ParameterValue(human_tracking_max_detections, value_type=int),
+                'track_iou_threshold': ParameterValue(human_tracking_track_iou_threshold, value_type=float),
+                'max_track_missed_frames': ParameterValue(human_tracking_max_track_missed_frames, value_type=int),
+                'max_inference_fps': ParameterValue(human_tracking_max_inference_fps, value_type=float),
+                'publish_debug_image': ParameterValue(human_tracking_publish_debug_image, value_type=bool),
             }],
         ),
         Node(

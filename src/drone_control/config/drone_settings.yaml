@@ -8,7 +8,7 @@ camera:
   depth_fps: 5
   enable_ir: false
 
-thermal_camera:
+archived_thermal_camera:
   device: /dev/video0
   width: 256
   height: 392
@@ -17,9 +17,13 @@ thermal_camera:
   output_encoding: yuv422_yuy2
   frame_id: thermal_camera_frame
 
-pose:
+human_tracking:
+  model_name: efficientdet_lite0_person_boxes
+  model_path: /home/andrew/models/efficientdet_lite0.tflite
   image_topic: /camera/color/image_raw
-  confidence_threshold: 0.4
-  min_confident_keypoints: 7
+  confidence_threshold: 0.35
+  max_detections: 8
+  track_iou_threshold: 0.3
+  max_track_missed_frames: 5
   max_inference_fps: 2.0
   publish_debug_image: true

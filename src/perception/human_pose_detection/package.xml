@@ -2,7 +2,7 @@
 <package format="3">
   <name>human_pose_detection</name>
   <version>0.1.0</version>
-  <description>RGB-only MoveNet Lightning INT8 human pose detection node.</description>
+  <description>RGB-only TensorFlow Lite human tracking nodes.</description>
   <maintainer email="user@example.com">Workspace maintainer</maintainer>
   <license>Apache-2.0</license>
 

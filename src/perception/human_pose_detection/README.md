@@ -1,6 +1,9 @@
-# Human Pose Detection
+# Human Tracking
 
-RGB-only ROS 2 node for MoveNet Lightning INT8 TensorFlow Lite inference.
+RGB-only ROS 2 nodes for TensorFlow Lite human tracking. The active launch path
+uses a lightweight person-box detector so multiple humans can be marked in the
+debug stream. The old MoveNet pose node remains in the package for archive and
+fallback use.
 
 No thermal camera, MLX90640 data, depth fusion, or multi-sensor confidence logic is used.
 
@@ -8,49 +11,44 @@ No thermal camera, MLX90640 data, depth fusion, or multi-sensor confidence logic
 
 ```bash
 ros2 launch human_pose_detection movenet_pose_launch.py \
-  model_path:=/path/to/movenet_lightning_int8.tflite \
+  model_path:=/path/to/efficientdet_lite0.tflite \
   image_topic:=/camera/image_raw
 ```
 
-The dashboard also auto-checks common model locations:
+The default model selection is hardcoded in launch parameters:
 
-- `~/models/movenet_lightning_int8.tflite`
-- `~/models/lite-model_movenet_singlepose_lightning_tflite_int8_4.tflite`
+- `model_name:=efficientdet_lite0_person_boxes`
+- `model_path:=/home/andrew/models/efficientdet_lite0.tflite`
 
 The top-level drone launch uses `/camera/color/image_raw` by default:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
   start_rosbridge:=true \
-  start_camera:=true \
-  pose_model_path:=/path/to/movenet_lightning_int8.tflite
+  start_camera:=true
 ```
 
 ## Topics
 
 - Subscribes: `/camera/image_raw` by default, configurable with `image_topic`
-- Publishes keypoints: `/human_pose/keypoints`
+- Publishes boxes: `/human_pose/keypoints`
 - Publishes detection flag: `/human_pose/person_detected`
 - Publishes annotated image: `/human_pose/debug_image`
 
-## Keypoint Payload
+## Box Payload
 
 `/human_pose/keypoints` is a `std_msgs/msg/Float32MultiArray`:
 
 ```text
 [
-  detected,
-  bbox_x,
-  bbox_y,
-  bbox_w,
-  bbox_h,
-  nose_x, nose_y, nose_score,
-  left_eye_x, left_eye_y, left_eye_score,
+  person_count,
+  person_1_track_id, person_1_x, person_1_y, person_1_w, person_1_h, person_1_score,
+  person_2_track_id, person_2_x, person_2_y, person_2_w, person_2_h, person_2_score,
   ...
 ]
 ```
 
-Coordinates are in source image pixels. A missing keypoint has `x=-1`, `y=-1`, and its raw score.
+Coordinates are in source image pixels.
 
 ## Runtime Dependencies
 

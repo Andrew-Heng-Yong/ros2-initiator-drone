@@ -20,15 +20,15 @@ def has_module(name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Check human pose runtime dependencies.')
-    parser.add_argument('--model', required=True, help='Path to the MoveNet Lightning INT8 .tflite file.')
+    parser = argparse.ArgumentParser(description='Check human tracking runtime dependencies.')
+    parser.add_argument('--model', required=True, help='Path to the TensorFlow Lite person-box .tflite file.')
     args = parser.parse_args()
 
     if not args.model or not os.path.isfile(os.path.expanduser(args.model)):
         print(
-            'Missing MoveNet model file. Put the MoveNet Lightning INT8 .tflite at '
-            '~/models/movenet_lightning_int8.tflite, or set MOVENET_MODEL_PATH / '
-            'pose_model_path to the real file path.'
+            'Missing human box model file. Put the EfficientDet Lite0 .tflite at '
+            '~/models/efficientdet_lite0.tflite, or set human_tracking_model_path '
+            'to the real file path.'
         )
         return 1
 
@@ -41,10 +41,10 @@ def main():
         missing.append('tflite_runtime or ai-edge-litert or tensorflow')
 
     if missing:
-        print('Missing human pose runtime dependency: ' + ', '.join(missing))
+        print('Missing human tracking runtime dependency: ' + ', '.join(missing))
         return 1
 
-    print('Human pose runtime dependencies look OK.')
+    print('Human tracking runtime dependencies look OK.')
     return 0
 
 

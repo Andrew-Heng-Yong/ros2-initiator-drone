@@ -15,11 +15,12 @@ setup(
     zip_safe=True,
     maintainer='Workspace maintainer',
     maintainer_email='user@example.com',
-    description='RGB-only MoveNet Lightning INT8 human pose detection node.',
+    description='RGB-only TensorFlow Lite human tracking nodes.',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
             'movenet_pose_node = human_pose_detection.movenet_pose_node:main',
+            'human_box_tracker_node = human_pose_detection.human_box_tracker_node:main',
             'check_runtime = human_pose_detection.check_runtime:main',
         ],
     },
