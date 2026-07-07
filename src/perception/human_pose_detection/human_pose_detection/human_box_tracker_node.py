@@ -27,15 +27,12 @@ except ImportError:
 DEFAULT_PERSON_CLASS_IDS = [0, 1]
 MODEL_PATH_ENV = 'HUMAN_BOX_MODEL_PATH'
 COMMON_MODEL_PATHS = (
-    '/home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite',
-    '/home/andrew/ros2-initiator-drone/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
-    '/home/andrew/ros2-initiator-drone/models/ssd_mobilenet_v1_1_metadata_1.tflite',
-    '/home/andrew/models/efficientdet_lite0.tflite',
-    '/home/andrew/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
-    '/home/andrew/models/ssd_mobilenet_v1_1_metadata_1.tflite',
-    '~/models/efficientdet_lite0.tflite',
-    '~/models/lite-model_efficientdet_lite0_detection_metadata_1.tflite',
-    '~/models/ssd_mobilenet_v1_1_metadata_1.tflite',
+    '/home/andrew/ros2-initiator-drone/models/efficientdet_lite0_int8.tflite',
+    '/home/andrew/ros2-initiator-drone/models/lite-model_efficientdet_lite0_int8_1.tflite',
+    '/home/andrew/models/efficientdet_lite0_int8.tflite',
+    '/home/andrew/models/lite-model_efficientdet_lite0_int8_1.tflite',
+    '~/models/efficientdet_lite0_int8.tflite',
+    '~/models/lite-model_efficientdet_lite0_int8_1.tflite',
 )
 
 
@@ -45,7 +42,7 @@ class HumanBoxTrackerNode(Node):
         self.bridge = CvBridge()
 
         self.declare_parameter('model_path', '')
-        self.declare_parameter('model_name', 'efficientdet_lite0_person_boxes')
+        self.declare_parameter('model_name', 'efficientdet_lite0_int8_person_boxes')
         self.declare_parameter('image_topic', '/camera/image_raw')
         self.declare_parameter('boxes_topic', '/human_pose/keypoints')
         self.declare_parameter('person_detected_topic', '/human_pose/person_detected')

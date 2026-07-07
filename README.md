@@ -54,8 +54,8 @@ camera:
 ```yaml
 human_box_tracker_node:
   ros__parameters:
-    model_name: efficientdet_lite0_person_boxes
-    model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite
+    model_name: efficientdet_lite0_int8_person_boxes
+    model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0_int8.tflite
     image_topic: /camera/color/image_raw
     confidence_threshold: 0.25
     max_detections: 8
@@ -85,7 +85,7 @@ want a separate tracker parameter file outside the install tree.
 Run only the human box tracker against an existing camera topic:
 
 ```bash
-ros2 launch human_pose_detection movenet_pose_launch.py \
+ros2 launch human_pose_detection human_box_tracker_launch.py \
   params_file:=/path/to/human_box_tracker.yaml
 ```
 

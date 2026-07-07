@@ -2,21 +2,20 @@
 
 RGB-only ROS 2 nodes for TensorFlow Lite human tracking. The active launch path
 uses a lightweight person-box detector so multiple humans can be marked in the
-debug stream. The old MoveNet pose node remains in the package for archive and
-fallback use.
+debug stream.
 
 ## Run
 
 ```bash
-ros2 launch human_pose_detection movenet_pose_launch.py \
+ros2 launch human_pose_detection human_box_tracker_launch.py \
   params_file:=/path/to/human_box_tracker.yaml
 ```
 
 The default model selection is in the installed ROS parameter file:
 
 - `share/human_pose_detection/config/human_box_tracker.yaml`
-- `model_name: efficientdet_lite0_person_boxes`
-- `model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite`
+- `model_name: efficientdet_lite0_int8_person_boxes`
+- `model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0_int8.tflite`
 
 The top-level drone launch uses `/camera/color/image_raw` by default, captures
 RGB at 640x360, and runs detection on a 582x360 center crop after removing 29 px
