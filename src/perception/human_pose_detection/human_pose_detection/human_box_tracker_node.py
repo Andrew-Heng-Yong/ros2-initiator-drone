@@ -24,7 +24,7 @@ except ImportError:
                 Interpreter = None
 
 
-DEFAULT_PERSON_CLASS_IDS = [0, 1]
+DEFAULT_PERSON_CLASS_IDS = [0]
 MODEL_PATH_ENV = 'HUMAN_BOX_MODEL_PATH'
 COMMON_MODEL_PATHS = (
     '/home/andrew/ros2-initiator-drone/models/efficientdet_lite0_int8.tflite',
@@ -47,11 +47,12 @@ class HumanBoxTrackerNode(Node):
         self.declare_parameter('boxes_topic', '/human_pose/keypoints')
         self.declare_parameter('person_detected_topic', '/human_pose/person_detected')
         self.declare_parameter('debug_image_topic', '/human_pose/debug_image')
-        self.declare_parameter('confidence_threshold', 0.35)
+        self.declare_parameter('confidence_threshold', 0.3)
         self.declare_parameter('max_detections', 8)
         self.declare_parameter('person_class_ids', DEFAULT_PERSON_CLASS_IDS)
+        self.declare_parameter('fallback_to_any_class', False)
         self.declare_parameter('log_top_detections', True)
-        self.declare_parameter('draw_candidate_boxes', True)
+        self.declare_parameter('draw_candidate_boxes', False)
         self.declare_parameter('crop_left_px', 29)
         self.declare_parameter('crop_right_px', 29)
         self.declare_parameter('crop_top_px', 0)
@@ -70,6 +71,7 @@ class HumanBoxTrackerNode(Node):
         self.person_class_ids = {
             int(class_id) for class_id in self.get_parameter('person_class_ids').value
         }
+        self.fallback_to_any_class = bool(self.get_parameter('fallback_to_any_class').value)
         self.log_top_detections = bool(self.get_parameter('log_top_detections').value)
         self.draw_candidate_boxes = bool(self.get_parameter('draw_candidate_boxes').value)
         self.crop_left_px = int(self.get_parameter('crop_left_px').value)
@@ -90,6 +92,8 @@ class HumanBoxTrackerNode(Node):
         self.interpreter = None
         self.logged_output_details = False
         self.logged_first_detections = False
+        self.logged_class_fallback = False
+        self.logged_rejected_person_hint = False
         self.latest_candidates: List[Tuple[int, float, float, float, float, float]] = []
 
         self._load_model()
@@ -115,6 +119,7 @@ class HumanBoxTrackerNode(Node):
             f'Running {self.model_name} on {self.image_topic}; '
             f'box threshold={self.confidence_threshold:.2f}; '
             f'person class ids={sorted(self.person_class_ids)}; '
+            f'fallback to any class={self.fallback_to_any_class}; '
             f'crop left/right/top/bottom='
             f'{self.crop_left_px}/{self.crop_right_px}/{self.crop_top_px}/{self.crop_bottom_px}; '
             f'max detections={self.max_detections}; '
@@ -322,6 +327,7 @@ class HumanBoxTrackerNode(Node):
         boxes = boxes.reshape(-1, boxes.shape[-1])[:, :4]
 
         detections = []
+        fallback_detections = []
         candidates = []
         for box, score, class_id in zip(boxes, scores, classes):
             class_value = int(round(float(class_id)))
@@ -334,10 +340,32 @@ class HumanBoxTrackerNode(Node):
                 break
             if float(score) < self.confidence_threshold:
                 continue
+            fallback_detections.append((x, y, w, h, float(score), class_value))
             if class_value not in self.person_class_ids:
                 continue
 
             detections.append((x, y, w, h, float(score)))
+
+        if not detections and self.fallback_to_any_class:
+            detections = [
+                (x, y, w, h, score)
+                for x, y, w, h, score, _class_value in fallback_detections[:self.max_detections]
+            ]
+            if detections and not self.logged_class_fallback:
+                self.logged_class_fallback = True
+                observed = sorted({detection[5] for detection in fallback_detections})
+                self.get_logger().warn(
+                    'No detections matched configured person_class_ids; '
+                    f'accepting high-confidence boxes from observed classes {observed}. '
+                    'Update person_class_ids after confirming which class is person for this model.'
+                )
+        elif not detections and fallback_detections and not self.logged_rejected_person_hint:
+            self.logged_rejected_person_hint = True
+            observed = sorted({detection[5] for detection in fallback_detections})
+            self.get_logger().warn(
+                'Detector produced high-confidence non-person boxes only: '
+                f'observed classes {observed}; configured person_class_ids={sorted(self.person_class_ids)}.'
+            )
         self.latest_candidates = candidates[:self.max_detections]
         self.log_detection_sample(scores, classes, detections)
         return detections

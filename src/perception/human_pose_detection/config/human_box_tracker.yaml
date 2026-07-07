@@ -6,11 +6,12 @@ human_box_tracker_node:
     boxes_topic: /human_pose/keypoints
     person_detected_topic: /human_pose/person_detected
     debug_image_topic: /human_pose/debug_image
-    confidence_threshold: 0.25
+    confidence_threshold: 0.3
     max_detections: 8
-    person_class_ids: [0, 1]
+    person_class_ids: [0]
+    fallback_to_any_class: false
     log_top_detections: true
-    draw_candidate_boxes: true
+    draw_candidate_boxes: false
     crop_left_px: 29
     crop_right_px: 29
     crop_top_px: 0

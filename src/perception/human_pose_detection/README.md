@@ -16,6 +16,7 @@ The default model selection is in the installed ROS parameter file:
 - `share/human_pose_detection/config/human_box_tracker.yaml`
 - `model_name: efficientdet_lite0_int8_person_boxes`
 - `model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0_int8.tflite`
+- `person_class_ids: [0]` keeps tracking locked to the EfficientDet COCO person class.
 
 The top-level drone launch uses `/camera/color/image_raw` by default, captures
 RGB at 640x360, and runs detection on a 582x360 center crop after removing 29 px
