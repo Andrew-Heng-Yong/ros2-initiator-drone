@@ -57,8 +57,11 @@ human_box_tracker_node:
     model_name: efficientdet_lite0_person_boxes
     model_path: /home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite
     image_topic: /camera/color/image_raw
-    confidence_threshold: 0.35
+    confidence_threshold: 0.25
     max_detections: 8
+    person_class_ids: [0, 1]
+    log_top_detections: true
+    draw_candidate_boxes: true
     crop_left_px: 29
     crop_right_px: 29
     crop_top_px: 0

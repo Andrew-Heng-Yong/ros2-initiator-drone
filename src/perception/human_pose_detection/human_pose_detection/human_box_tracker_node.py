@@ -24,7 +24,7 @@ except ImportError:
                 Interpreter = None
 
 
-COCO_PERSON_CLASS_IDS = {0, 1}
+DEFAULT_PERSON_CLASS_IDS = [0, 1]
 MODEL_PATH_ENV = 'HUMAN_BOX_MODEL_PATH'
 COMMON_MODEL_PATHS = (
     '/home/andrew/ros2-initiator-drone/models/efficientdet_lite0.tflite',
@@ -52,6 +52,9 @@ class HumanBoxTrackerNode(Node):
         self.declare_parameter('debug_image_topic', '/human_pose/debug_image')
         self.declare_parameter('confidence_threshold', 0.35)
         self.declare_parameter('max_detections', 8)
+        self.declare_parameter('person_class_ids', DEFAULT_PERSON_CLASS_IDS)
+        self.declare_parameter('log_top_detections', True)
+        self.declare_parameter('draw_candidate_boxes', True)
         self.declare_parameter('crop_left_px', 29)
         self.declare_parameter('crop_right_px', 29)
         self.declare_parameter('crop_top_px', 0)
@@ -67,6 +70,11 @@ class HumanBoxTrackerNode(Node):
         self.image_topic = self.get_parameter('image_topic').value
         self.confidence_threshold = float(self.get_parameter('confidence_threshold').value)
         self.max_detections = int(self.get_parameter('max_detections').value)
+        self.person_class_ids = {
+            int(class_id) for class_id in self.get_parameter('person_class_ids').value
+        }
+        self.log_top_detections = bool(self.get_parameter('log_top_detections').value)
+        self.draw_candidate_boxes = bool(self.get_parameter('draw_candidate_boxes').value)
         self.crop_left_px = int(self.get_parameter('crop_left_px').value)
         self.crop_right_px = int(self.get_parameter('crop_right_px').value)
         self.crop_top_px = int(self.get_parameter('crop_top_px').value)
@@ -83,6 +91,9 @@ class HumanBoxTrackerNode(Node):
         self.tracks: List[Dict[str, float]] = []
         self.model_error: Optional[str] = None
         self.interpreter = None
+        self.logged_output_details = False
+        self.logged_first_detections = False
+        self.latest_candidates: List[Tuple[int, float, float, float, float, float]] = []
 
         self._load_model()
 
@@ -106,6 +117,7 @@ class HumanBoxTrackerNode(Node):
         self.get_logger().info(
             f'Running {self.model_name} on {self.image_topic}; '
             f'box threshold={self.confidence_threshold:.2f}; '
+            f'person class ids={sorted(self.person_class_ids)}; '
             f'crop left/right/top/bottom='
             f'{self.crop_left_px}/{self.crop_right_px}/{self.crop_top_px}/{self.crop_bottom_px}; '
             f'max detections={self.max_detections}; '
@@ -130,6 +142,7 @@ class HumanBoxTrackerNode(Node):
         self.interpreter.allocate_tensors()
         self.input_details = self.interpreter.get_input_details()[0]
         self.output_details = self.interpreter.get_output_details()
+        self.log_output_details()
 
         input_shape = self.input_details['shape']
         if len(input_shape) != 4 or int(input_shape[3]) != 3:
@@ -141,6 +154,18 @@ class HumanBoxTrackerNode(Node):
             f'Loaded {self.model_path} with input {self.input_width}x{self.input_height} '
             f'{self.input_dtype}'
         )
+
+    def log_output_details(self) -> None:
+        if self.logged_output_details:
+            return
+        self.logged_output_details = True
+        for index, detail in enumerate(self.output_details):
+            self.get_logger().info(
+                'Output tensor '
+                f'{index}: name={detail.get("name", "")}, '
+                f'shape={list(detail.get("shape", []))}, '
+                f'dtype={detail.get("dtype")}'
+            )
 
     def resolve_model_path(self, configured_path: str) -> str:
         candidates = []
@@ -300,18 +325,24 @@ class HumanBoxTrackerNode(Node):
         boxes = boxes.reshape(-1, boxes.shape[-1])[:, :4]
 
         detections = []
+        candidates = []
         for box, score, class_id in zip(boxes, scores, classes):
+            class_value = int(round(float(class_id)))
+            x, y, w, h = self.decode_box(box, width, height)
+            if w <= 1.0 or h <= 1.0:
+                continue
+            candidates.append((class_value, x, y, w, h, float(score)))
+
             if len(detections) >= self.max_detections:
                 break
             if float(score) < self.confidence_threshold:
                 continue
-            if int(round(float(class_id))) not in COCO_PERSON_CLASS_IDS:
+            if class_value not in self.person_class_ids:
                 continue
 
-            x, y, w, h = self.decode_box(box, width, height)
-            if w <= 1.0 or h <= 1.0:
-                continue
             detections.append((x, y, w, h, float(score)))
+        self.latest_candidates = candidates[:self.max_detections]
+        self.log_detection_sample(scores, classes, detections)
         return detections
 
     def find_output(self, outputs, hints: Sequence[str]) -> Optional[np.ndarray]:
@@ -325,7 +356,9 @@ class HumanBoxTrackerNode(Node):
         vectors = [
             np.asarray(value).reshape(-1)
             for value in values
-            if np.asarray(value).ndim <= 2 and np.asarray(value).size > 1
+            if np.asarray(value).ndim <= 2
+            and np.asarray(value).size > 1
+            and np.asarray(value).shape[-1:] != (4,)
         ]
         boxes = box_candidates[0] if box_candidates else None
         classes = None
@@ -348,6 +381,25 @@ class HumanBoxTrackerNode(Node):
         if classes is None and len(vectors) > 1:
             classes = vectors[1]
         return boxes, scores, classes
+
+    def log_detection_sample(
+        self,
+        scores: np.ndarray,
+        classes: np.ndarray,
+        detections: List[Tuple[float, float, float, float, float]],
+    ) -> None:
+        if not self.log_top_detections or self.logged_first_detections:
+            return
+        self.logged_first_detections = True
+        count = min(5, len(scores), len(classes))
+        sample = [
+            f'class={int(round(float(classes[index])))} score={float(scores[index]):.2f}'
+            for index in range(count)
+        ]
+        self.get_logger().info(
+            f'First detector candidates: {", ".join(sample) if sample else "none"}; '
+            f'accepted person boxes={len(detections)}'
+        )
 
     def decode_box(self, box: np.ndarray, width: int, height: int) -> Tuple[float, float, float, float]:
         values = [float(value) for value in box]
@@ -445,6 +497,27 @@ class HumanBoxTrackerNode(Node):
 
     def draw_debug_image(self, image: np.ndarray, boxes: List[Tuple[int, float, float, float, float, float]]) -> np.ndarray:
         output = image.copy()
+        if self.draw_candidate_boxes:
+            for class_id, x, y, w, h, score in self.latest_candidates:
+                if class_id in self.person_class_ids and score >= self.confidence_threshold:
+                    continue
+                cv2.rectangle(
+                    output,
+                    (int(x), int(y)),
+                    (int(x + w), int(y + h)),
+                    (255, 180, 40),
+                    1,
+                )
+                cv2.putText(
+                    output,
+                    f'c{class_id} {score:.2f}',
+                    (int(x), max(14, int(y) - 4)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (255, 180, 40),
+                    1,
+                    cv2.LINE_AA,
+                )
         for track_id, x, y, w, h, score in boxes:
             start = (int(x), int(y))
             end = (int(x + w), int(y + h))
