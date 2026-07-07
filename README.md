@@ -15,6 +15,8 @@ Verify the sensor is visible, normally at `0x33`:
 sudo i2cdetect -y 1
 ```
 
+On MLX90640 modules with a `PS` protocol-select pin, connect `PS` to ground so the module uses I2C mode.
+
 Build the top-level control package and its workspace dependencies:
 
 ```bash
