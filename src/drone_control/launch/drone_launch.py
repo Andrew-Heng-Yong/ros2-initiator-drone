@@ -32,12 +32,12 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'start_depth_camera',
             default_value='false',
-            description='Start the Orbbec depth/color camera driver.',
+            description='Start the Orbbec depth camera driver.',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',
             default_value='false',
-            description='Start the RGB camera thermal overlay node.',
+            description='Start the camera thermal overlay node.',
         ),
         DeclareLaunchArgument(
             'overlay_alpha',
@@ -47,13 +47,11 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
-                'color_width:=640',
-                'color_height:=480',
-                'color_fps:=10',
+                'enable_color:=false',
                 'enable_depth:=true',
                 'depth_width:=640',
                 'depth_height:=480',
-                'depth_fps:=10',
+                'depth_fps:=5',
                 'enable_ir:=false',
             ],
             output='screen',
@@ -63,12 +61,12 @@ def generate_launch_description():
             cmd=[
                 'bash', '-lc',
                 'for attempt in $(seq 1 30); do '
-                'ros2 topic info /camera/color/image_raw > /dev/null 2>&1 && break; '
-                'echo "Waiting for RGB topic /camera/color/image_raw..."; '
+                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 && break; '
+                'echo "Waiting for depth topic /camera/depth/image_raw..."; '
                 'sleep 1; '
                 'done; '
-                'ros2 topic info /camera/color/image_raw > /dev/null 2>&1 || '
-                '(echo "Timed out waiting for RGB topic /camera/color/image_raw"; exit 1); '
+                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 || '
+                '(echo "Timed out waiting for depth topic /camera/depth/image_raw"; exit 1); '
                 f'exec ros2 run mlx90640_node mlx90640_node --ros-args '
                 f'--params-file "{mlx90640_params}"',
             ],
@@ -83,7 +81,7 @@ def generate_launch_description():
             condition=IfCondition(start_thermal_overlay),
             parameters=[{
                 'alpha': ParameterValue(overlay_alpha, value_type=float),
-                'camera_topic': '/camera/color/image_raw',
+                'camera_topic': '/camera/depth/image_raw',
                 'thermal_topic': '/thermal/image_raw',
                 'output_topic': '/camera/thermal_overlay/image_raw',
                 'camera_hfov_deg': 67.0,

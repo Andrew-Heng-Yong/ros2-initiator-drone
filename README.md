@@ -51,7 +51,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The frontend starts the Orbbec camera at 640x480 10 fps and performs the RGB thermal overlay in the browser by combining `/camera/color/image_raw` with `/thermal/image_raw`. The RGB camera FOV is H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts RGB first and waits for the first RGB frame before starting the MLX90640 node, so thermal only appears as an overlay source after the camera is running.
+The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts depth first and waits for the first depth topic before starting the MLX90640 node, so thermal only appears as an overlay source after the depth stream is running.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:

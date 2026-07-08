@@ -76,20 +76,18 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts color at 640x480 10 fps and depth at 640x480
-10 fps. Test the same settings manually:
+The drone launch file starts depth at 640x480 5 fps without launching RGB.
+Test the same settings manually:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/orbbec_ws/install/setup.bash
 ros2 launch orbbec_camera gemini_e.launch.py \
-  color_width:=640 \
-  color_height:=480 \
-  color_fps:=10 \
+  enable_color:=false \
   enable_depth:=true \
   depth_width:=640 \
   depth_height:=480 \
-  depth_fps:=10 \
+  depth_fps:=5 \
   enable_ir:=false
 ```
 
@@ -97,19 +95,19 @@ Verify topics:
 
 ```bash
 ros2 topic list | grep -E "camera|depth|image|camera_info"
-ros2 topic hz /camera/color/image_raw
 ros2 topic hz /camera/depth/image_raw
+ros2 topic echo /camera/depth/camera_info --once
 ```
 
-## Dashboard RGB Overlay
+## Dashboard Depth Overlay
 
-The dashboard renders the Orbbec RGB frame from `/camera/color/image_raw` as the
+The dashboard renders the Orbbec depth frame from `/camera/depth/image_raw` as the
 window and blends `/thermal/image_raw` into the center using the MLX90640 field
 of view, 55 degrees horizontal by 35 degrees vertical. Source both the Orbbec
 workspace and the drone workspace, then start the camera explicitly. The drone
-launch starts RGB first and waits for the first RGB frame before starting the
-MLX90640 node, so thermal only appears as an overlay source after the camera is
-running.
+launch starts depth first and waits for the depth topic before starting the
+MLX90640 node, so thermal only appears as an overlay source after the depth
+stream is running.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -124,14 +122,16 @@ ros2 launch drone_control drone_launch.py \
 The dashboard subscribes to:
 
 ```text
-/camera/color/image_raw
+/camera/depth/image_raw
+/camera/depth/camera_info
 /thermal/image_raw
 ```
 
-The browser-side overlay assumes the depth/color camera and MLX90640 are mounted
+The browser-side overlay assumes the depth camera and MLX90640 are mounted
 at the same position. It maps the MLX90640 field of view, 55 degrees horizontal
-by 35 degrees vertical, into the camera field of view, 67 degrees horizontal by
-53.6 degrees vertical.
+by 35 degrees vertical, into the depth camera field of view from
+`/camera/depth/camera_info`, falling back to 67 degrees horizontal by 53.6
+degrees vertical.
 
 ## Troubleshooting
 
@@ -192,5 +192,5 @@ those exact depth modes. On the Raspberry Pi test unit, the Gemini E connected
 as USB2.0 and advertised `640x480 10fps Y11`, so the project default uses:
 
 ```bash
-depth_width:=640 depth_height:=480 depth_fps:=10
+depth_width:=640 depth_height:=480 depth_fps:=5
 ```
