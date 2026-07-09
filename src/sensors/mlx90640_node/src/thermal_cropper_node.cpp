@@ -162,6 +162,46 @@ sensor_msgs::msg::Image mask_image_outside_roi(
   return output;
 }
 
+sensor_msgs::msg::Image mask_image_by_pixel_mask(
+  const sensor_msgs::msg::Image & image,
+  const std::vector<uint8_t> & mask,
+  int mask_width,
+  int mask_height)
+{
+  auto output = image;
+  std::fill(output.data.begin(), output.data.end(), 0);
+
+  const int bpp = bytes_per_pixel(image);
+  if (
+    bpp <= 0 ||
+    mask_width != static_cast<int>(image.width) ||
+    mask_height != static_cast<int>(image.height) ||
+    mask.size() < static_cast<size_t>(mask_width * mask_height))
+  {
+    return output;
+  }
+
+  for (int y = 0; y < mask_height; ++y) {
+    for (int x = 0; x < mask_width; ++x) {
+      if (!mask[static_cast<size_t>(y * mask_width + x)]) {
+        continue;
+      }
+      const auto source = static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
+      const auto target = static_cast<size_t>(y) * output.step + static_cast<size_t>(x) * bpp;
+      if (source + static_cast<size_t>(bpp) <= image.data.size() &&
+        target + static_cast<size_t>(bpp) <= output.data.size())
+      {
+        std::copy_n(
+          image.data.begin() + static_cast<long>(source),
+          static_cast<size_t>(bpp),
+          output.data.begin() + static_cast<long>(target));
+      }
+    }
+  }
+
+  return output;
+}
+
 sensor_msgs::msg::CameraInfo mask_camera_info(
   const sensor_msgs::msg::CameraInfo & info,
   const CropRegion & roi)
@@ -283,6 +323,7 @@ private:
   {
     if (!enabled_) {
       have_crop_ = false;
+      latest_thermal_mask_.clear();
       if (passthrough_when_no_region_) {
         thermal_pub_->publish(image);
       }
@@ -293,9 +334,11 @@ private:
     latest_crop_ = detect_crop(image);
     have_crop_ = latest_crop_.width > 0 && latest_crop_.height > 0;
     if (have_crop_) {
-      thermal_pub_->publish(mask_image_outside_roi(image, latest_crop_));
+      thermal_pub_->publish(mask_image_by_pixel_mask(
+        image, latest_thermal_mask_, latest_thermal_width_, latest_thermal_height_));
     } else if (passthrough_when_no_region_) {
       thermal_pub_->publish(image);
+      latest_thermal_mask_.clear();
     }
   }
 
@@ -332,7 +375,7 @@ private:
     roi.width = std::clamp(roi.width, 1, static_cast<int>(image.width) - roi.x);
     roi.height = std::clamp(roi.height, 1, static_cast<int>(image.height) - roi.y);
 
-    depth_pub_->publish(mask_image_outside_roi(image, roi));
+    depth_pub_->publish(mask_depth_by_thermal_mask(image));
     if (have_camera_info_) {
       auto info = mask_camera_info(latest_camera_info_, roi);
       info.header = image.header;
@@ -349,6 +392,7 @@ private:
 
   CropRegion detect_crop(const sensor_msgs::msg::Image & image)
   {
+    latest_thermal_mask_.clear();
     const int width = static_cast<int>(image.width);
     const int height = static_cast<int>(image.height);
     if (width <= 0 || height <= 0) {
@@ -400,30 +444,23 @@ private:
     }
 
     std::vector<uint8_t> visited(mask.size(), 0);
-    CropRegion best;
+    std::vector<int> best_cells;
+    int best_cluster_size = 0;
     for (int index = 0; index < static_cast<int>(mask.size()); ++index) {
       if (!mask[static_cast<size_t>(index)] || visited[static_cast<size_t>(index)]) {
         continue;
       }
       std::queue<int> queue;
+      std::vector<int> cells;
       queue.push(index);
       visited[static_cast<size_t>(index)] = 1;
-      int count = 0;
-      int min_x = columns;
-      int min_y = rows;
-      int max_x = 0;
-      int max_y = 0;
 
       while (!queue.empty()) {
         const int current = queue.front();
         queue.pop();
+        cells.push_back(current);
         const int x = current % columns;
         const int y = current / columns;
-        ++count;
-        min_x = std::min(min_x, x);
-        min_y = std::min(min_y, y);
-        max_x = std::max(max_x, x);
-        max_y = std::max(max_y, y);
 
         for (int dy = -1; dy <= 1; ++dy) {
           for (int dx = -1; dx <= 1; ++dx) {
@@ -445,20 +482,73 @@ private:
         }
       }
 
-      if (count > best.cluster_size) {
-        const int inflate = std::max(0, inflation_radius_thermal_pixels_);
-        const int left = std::max(0, min_x * unit - inflate);
-        const int top = std::max(0, min_y * unit - inflate);
-        const int right = std::min(width, (max_x + 1) * unit + inflate);
-        const int bottom = std::min(height, (max_y + 1) * unit + inflate);
-        best = {left, top, right - left, bottom - top, count, highlighted_count};
+      if (static_cast<int>(cells.size()) > best_cluster_size) {
+        best_cluster_size = static_cast<int>(cells.size());
+        best_cells = std::move(cells);
       }
     }
 
-    if (best.cluster_size < min_region_size_) {
+    if (best_cluster_size < min_region_size_) {
       return {};
     }
-    return best;
+
+    latest_thermal_mask_.assign(static_cast<size_t>(width * height), 0);
+    const int inflate = std::max(0, inflation_radius_thermal_pixels_);
+    const int inflate_squared = inflate * inflate;
+    for (const int cell : best_cells) {
+      const int cell_x = cell % columns;
+      const int cell_y = cell / columns;
+      const int source_left = cell_x * unit;
+      const int source_top = cell_y * unit;
+      const int source_right = std::min(width, (cell_x + 1) * unit);
+      const int source_bottom = std::min(height, (cell_y + 1) * unit);
+
+      for (int source_y = source_top; source_y < source_bottom; ++source_y) {
+        for (int source_x = source_left; source_x < source_right; ++source_x) {
+          for (int dy = -inflate; dy <= inflate; ++dy) {
+            for (int dx = -inflate; dx <= inflate; ++dx) {
+              if (dx * dx + dy * dy > inflate_squared) {
+                continue;
+              }
+              const int x = source_x + dx;
+              const int y = source_y + dy;
+              if (x < 0 || x >= width || y < 0 || y >= height) {
+                continue;
+              }
+              latest_thermal_mask_[static_cast<size_t>(y * width + x)] = 1;
+            }
+          }
+        }
+      }
+    }
+
+    int left = width;
+    int top = height;
+    int right = -1;
+    int bottom = -1;
+    int selected_pixels = 0;
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        if (!latest_thermal_mask_[static_cast<size_t>(y * width + x)]) {
+          continue;
+        }
+        ++selected_pixels;
+        left = std::min(left, x);
+        top = std::min(top, y);
+        right = std::max(right, x);
+        bottom = std::max(bottom, y);
+      }
+    }
+    if (selected_pixels == 0) {
+      return {};
+    }
+    return {
+      left,
+      top,
+      right - left + 1,
+      bottom - top + 1,
+      best_cluster_size,
+      highlighted_count};
   }
 
   bool is_highlighted(float value, float low, float high) const
@@ -476,6 +566,81 @@ private:
       return false;
     }
     return true;
+  }
+
+  sensor_msgs::msg::Image mask_depth_by_thermal_mask(const sensor_msgs::msg::Image & image) const
+  {
+    auto output = image;
+    std::fill(output.data.begin(), output.data.end(), 0);
+
+    const int bpp = bytes_per_pixel(image);
+    if (
+      bpp <= 0 ||
+      latest_thermal_width_ <= 0 ||
+      latest_thermal_height_ <= 0 ||
+      latest_thermal_mask_.size() <
+      static_cast<size_t>(latest_thermal_width_ * latest_thermal_height_))
+    {
+      return output;
+    }
+
+    const double depth_fraction_x = fov_fraction(thermal_hfov_deg_, depth_hfov_deg_) *
+      thermal_scale_ * thermal_stretch_x_;
+    const double depth_fraction_y = fov_fraction(thermal_vfov_deg_, depth_vfov_deg_) *
+      thermal_scale_ * thermal_stretch_y_;
+    const int depth_width = static_cast<int>(image.width);
+    const int depth_height = static_cast<int>(image.height);
+    const int thermal_window_width = std::max(
+      latest_thermal_width_, static_cast<int>(std::round(depth_width * depth_fraction_x)));
+    const int thermal_window_height = std::max(
+      latest_thermal_height_, static_cast<int>(std::round(depth_height * depth_fraction_y)));
+    const int thermal_window_left = static_cast<int>(
+      std::round((depth_width - thermal_window_width) / 2.0 + thermal_offset_x_));
+    const int thermal_window_top = static_cast<int>(
+      std::round((depth_height - thermal_window_height) / 2.0 + thermal_offset_y_));
+
+    for (int y = 0; y < depth_height; ++y) {
+      const int local_y = y - thermal_window_top;
+      if (local_y < 0 || local_y >= thermal_window_height) {
+        continue;
+      }
+      const int thermal_y = std::clamp(
+        static_cast<int>(std::floor(
+          local_y * latest_thermal_height_ / static_cast<double>(thermal_window_height))),
+        0,
+        latest_thermal_height_ - 1);
+
+      for (int x = 0; x < depth_width; ++x) {
+        const int local_x = x - thermal_window_left;
+        if (local_x < 0 || local_x >= thermal_window_width) {
+          continue;
+        }
+        const int display_thermal_x = std::clamp(
+          static_cast<int>(std::floor(
+            local_x * latest_thermal_width_ / static_cast<double>(thermal_window_width))),
+          0,
+          latest_thermal_width_ - 1);
+        const int thermal_x = flip_thermal_x_ ?
+          latest_thermal_width_ - 1 - display_thermal_x :
+          display_thermal_x;
+        if (!latest_thermal_mask_[static_cast<size_t>(thermal_y * latest_thermal_width_ + thermal_x)]) {
+          continue;
+        }
+
+        const auto source = static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
+        const auto target = static_cast<size_t>(y) * output.step + static_cast<size_t>(x) * bpp;
+        if (source + static_cast<size_t>(bpp) <= image.data.size() &&
+          target + static_cast<size_t>(bpp) <= output.data.size())
+        {
+          std::copy_n(
+            image.data.begin() + static_cast<long>(source),
+            static_cast<size_t>(bpp),
+            output.data.begin() + static_cast<long>(target));
+        }
+      }
+    }
+
+    return output;
   }
 
   CropRegion thermal_to_depth_roi(const CropRegion & thermal, int depth_width, int depth_height) const
@@ -550,6 +715,7 @@ private:
   bool enabled_ = true;
 
   CropRegion latest_crop_;
+  std::vector<uint8_t> latest_thermal_mask_;
   bool have_crop_ = false;
   int latest_thermal_width_ = 32;
   int latest_thermal_height_ = 24;
