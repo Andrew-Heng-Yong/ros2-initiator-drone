@@ -128,6 +128,40 @@ sensor_msgs::msg::Image crop_image(const sensor_msgs::msg::Image & image, const 
   return output;
 }
 
+sensor_msgs::msg::Image mask_image_outside_roi(
+  const sensor_msgs::msg::Image & image,
+  const CropRegion & roi)
+{
+  auto output = image;
+  std::fill(output.data.begin(), output.data.end(), 0);
+
+  const int bpp = bytes_per_pixel(image);
+  if (bpp <= 0 || roi.width <= 0 || roi.height <= 0) {
+    return output;
+  }
+
+  const int x = std::clamp(roi.x, 0, static_cast<int>(image.width));
+  const int y = std::clamp(roi.y, 0, static_cast<int>(image.height));
+  const int width = std::clamp(roi.width, 0, static_cast<int>(image.width) - x);
+  const int height = std::clamp(roi.height, 0, static_cast<int>(image.height) - y);
+
+  for (int row = 0; row < height; ++row) {
+    const auto source = static_cast<size_t>(y + row) * image.step +
+      static_cast<size_t>(x) * bpp;
+    const auto target = static_cast<size_t>(y + row) * output.step +
+      static_cast<size_t>(x) * bpp;
+    const auto bytes = static_cast<size_t>(width) * bpp;
+    if (source + bytes <= image.data.size() && target + bytes <= output.data.size()) {
+      std::copy_n(
+        image.data.begin() + static_cast<long>(source),
+        bytes,
+        output.data.begin() + static_cast<long>(target));
+    }
+  }
+
+  return output;
+}
+
 sensor_msgs::msg::CameraInfo crop_camera_info(
   const sensor_msgs::msg::CameraInfo & info,
   const CropRegion & roi)
@@ -265,7 +299,7 @@ private:
     latest_crop_ = detect_crop(image);
     have_crop_ = latest_crop_.width > 0 && latest_crop_.height > 0;
     if (have_crop_) {
-      thermal_pub_->publish(crop_image(image, latest_crop_));
+      thermal_pub_->publish(mask_image_outside_roi(image, latest_crop_));
     } else if (passthrough_when_no_region_) {
       thermal_pub_->publish(image);
     }
