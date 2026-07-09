@@ -6,3 +6,32 @@ mlx90640_node:
     emissivity: 0.95
     frame_id: mlx90640_optical_frame
     topic: thermal/image_raw
+
+thermal_cropper_node:
+  ros__parameters:
+    depth_topic: /camera/depth/image_raw
+    depth_camera_info_topic: /camera/depth/camera_info
+    thermal_topic: /thermal/image_raw
+    output_depth_topic: /camera/depth/cropped/image_raw
+    output_thermal_topic: /thermal/cropped/image_raw
+    output_camera_info_topic: /camera/depth/cropped/camera_info
+    output_roi_topic: /thermal/crop_region
+    enabled: true
+    crop_unit_thermal_pixels: 1
+    min_region_size: 4
+    inflation_radius_thermal_pixels: 1
+    highlight_min_temp: 30.0
+    highlight_max_temp: 120.0
+    highlight_min_delta_from_frame_low: 3.0
+    highlight_max_delta_from_frame_high: 1000.0
+    depth_fov_horizontal: 67.0
+    depth_fov_vertical: 53.6
+    thermal_fov_horizontal: 55.0
+    thermal_fov_vertical: 35.0
+    thermal_offset_x: 10.0
+    thermal_offset_y: 0.0
+    thermal_scale: 0.8
+    thermal_stretch_x: 0.8
+    thermal_stretch_y: 1.0
+    flip_thermal_x: true
+    passthrough_when_no_region: true

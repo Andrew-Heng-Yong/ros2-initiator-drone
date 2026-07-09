@@ -21,6 +21,7 @@ def generate_launch_description():
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
+    start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
 
     return LaunchDescription([
@@ -38,6 +39,11 @@ def generate_launch_description():
             'start_thermal_overlay',
             default_value='false',
             description='Start the camera thermal overlay node.',
+        ),
+        DeclareLaunchArgument(
+            'start_thermal_cropper',
+            default_value='false',
+            description='Start the thermal-guided depth cropper node.',
         ),
         DeclareLaunchArgument(
             'overlay_alpha',
@@ -72,6 +78,14 @@ def generate_launch_description():
             ],
             output='screen',
             condition=IfCondition(start_depth_camera),
+        ),
+        Node(
+            package='mlx90640_node',
+            executable='thermal_cropper_node',
+            name='thermal_cropper_node',
+            output='screen',
+            condition=IfCondition(start_thermal_cropper),
+            parameters=[mlx90640_params],
         ),
         Node(
             package='mlx90640_node',
