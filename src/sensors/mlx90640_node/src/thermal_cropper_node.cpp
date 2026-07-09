@@ -162,17 +162,11 @@ sensor_msgs::msg::Image mask_image_outside_roi(
   return output;
 }
 
-sensor_msgs::msg::CameraInfo crop_camera_info(
+sensor_msgs::msg::CameraInfo mask_camera_info(
   const sensor_msgs::msg::CameraInfo & info,
   const CropRegion & roi)
 {
   auto output = info;
-  output.width = static_cast<uint32_t>(roi.width);
-  output.height = static_cast<uint32_t>(roi.height);
-  output.k[2] -= roi.x;
-  output.k[5] -= roi.y;
-  output.p[2] -= roi.x;
-  output.p[6] -= roi.y;
   output.roi.x_offset = static_cast<uint32_t>(roi.x);
   output.roi.y_offset = static_cast<uint32_t>(roi.y);
   output.roi.width = static_cast<uint32_t>(roi.width);
@@ -338,9 +332,9 @@ private:
     roi.width = std::clamp(roi.width, 1, static_cast<int>(image.width) - roi.x);
     roi.height = std::clamp(roi.height, 1, static_cast<int>(image.height) - roi.y);
 
-    depth_pub_->publish(crop_image(image, roi));
+    depth_pub_->publish(mask_image_outside_roi(image, roi));
     if (have_camera_info_) {
-      auto info = crop_camera_info(latest_camera_info_, roi);
+      auto info = mask_camera_info(latest_camera_info_, roi);
       info.header = image.header;
       camera_info_pub_->publish(info);
     }
