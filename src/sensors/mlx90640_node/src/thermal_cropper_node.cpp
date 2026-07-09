@@ -229,11 +229,11 @@ private:
       if (name == "enabled") {
         enabled_ = parameter.as_bool();
       } else if (name == "crop_unit_thermal_pixels") {
-        crop_unit_thermal_pixels_ = std::max(1, parameter.as_int());
+        crop_unit_thermal_pixels_ = static_cast<int>(std::max<int64_t>(1, parameter.as_int()));
       } else if (name == "min_region_size") {
-        min_region_size_ = std::max(1, parameter.as_int());
+        min_region_size_ = static_cast<int>(std::max<int64_t>(1, parameter.as_int()));
       } else if (name == "inflation_radius_thermal_pixels") {
-        inflation_radius_thermal_pixels_ = std::max(0, parameter.as_int());
+        inflation_radius_thermal_pixels_ = static_cast<int>(std::max<int64_t>(0, parameter.as_int()));
       } else if (name == "highlight_min_temp") {
         highlight_min_temp_ = parameter.as_double();
       } else if (name == "highlight_max_temp") {
