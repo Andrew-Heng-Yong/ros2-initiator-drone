@@ -100,68 +100,6 @@ bool read_thermal_value(const sensor_msgs::msg::Image & image, int x, int y, flo
   return false;
 }
 
-sensor_msgs::msg::Image crop_image(const sensor_msgs::msg::Image & image, const CropRegion & roi)
-{
-  sensor_msgs::msg::Image output;
-  output.header = image.header;
-  output.height = static_cast<uint32_t>(roi.height);
-  output.width = static_cast<uint32_t>(roi.width);
-  output.encoding = image.encoding;
-  output.is_bigendian = image.is_bigendian;
-
-  const int bpp = bytes_per_pixel(image);
-  if (bpp <= 0 || roi.width <= 0 || roi.height <= 0) {
-    return output;
-  }
-
-  output.step = static_cast<uint32_t>(roi.width * bpp);
-  output.data.resize(static_cast<size_t>(output.step) * output.height);
-  for (int y = 0; y < roi.height; ++y) {
-    const auto source = static_cast<size_t>(roi.y + y) * image.step +
-      static_cast<size_t>(roi.x) * bpp;
-    const auto target = static_cast<size_t>(y) * output.step;
-    const auto bytes = static_cast<size_t>(roi.width) * bpp;
-    if (source + bytes <= image.data.size() && target + bytes <= output.data.size()) {
-      std::copy_n(image.data.begin() + static_cast<long>(source), bytes, output.data.begin() + static_cast<long>(target));
-    }
-  }
-  return output;
-}
-
-sensor_msgs::msg::Image mask_image_outside_roi(
-  const sensor_msgs::msg::Image & image,
-  const CropRegion & roi)
-{
-  auto output = image;
-  std::fill(output.data.begin(), output.data.end(), 0);
-
-  const int bpp = bytes_per_pixel(image);
-  if (bpp <= 0 || roi.width <= 0 || roi.height <= 0) {
-    return output;
-  }
-
-  const int x = std::clamp(roi.x, 0, static_cast<int>(image.width));
-  const int y = std::clamp(roi.y, 0, static_cast<int>(image.height));
-  const int width = std::clamp(roi.width, 0, static_cast<int>(image.width) - x);
-  const int height = std::clamp(roi.height, 0, static_cast<int>(image.height) - y);
-
-  for (int row = 0; row < height; ++row) {
-    const auto source = static_cast<size_t>(y + row) * image.step +
-      static_cast<size_t>(x) * bpp;
-    const auto target = static_cast<size_t>(y + row) * output.step +
-      static_cast<size_t>(x) * bpp;
-    const auto bytes = static_cast<size_t>(width) * bpp;
-    if (source + bytes <= image.data.size() && target + bytes <= output.data.size()) {
-      std::copy_n(
-        image.data.begin() + static_cast<long>(source),
-        bytes,
-        output.data.begin() + static_cast<long>(target));
-    }
-  }
-
-  return output;
-}
-
 sensor_msgs::msg::Image mask_image_by_pixel_mask(
   const sensor_msgs::msg::Image & image,
   const std::vector<uint8_t> & mask,
@@ -199,6 +137,13 @@ sensor_msgs::msg::Image mask_image_by_pixel_mask(
     }
   }
 
+  return output;
+}
+
+sensor_msgs::msg::Image black_image_like(const sensor_msgs::msg::Image & image)
+{
+  auto output = image;
+  std::fill(output.data.begin(), output.data.end(), 0);
   return output;
 }
 
@@ -336,8 +281,8 @@ private:
     if (have_crop_) {
       thermal_pub_->publish(mask_image_by_pixel_mask(
         image, latest_thermal_mask_, latest_thermal_width_, latest_thermal_height_));
-    } else if (passthrough_when_no_region_) {
-      thermal_pub_->publish(image);
+    } else {
+      thermal_pub_->publish(black_image_like(image));
       latest_thermal_mask_.clear();
     }
   }
@@ -358,15 +303,13 @@ private:
     CropRegion roi;
     if (have_crop_) {
       roi = thermal_to_depth_roi(latest_crop_, static_cast<int>(image.width), static_cast<int>(image.height));
-    } else if (passthrough_when_no_region_) {
-      depth_pub_->publish(image);
+    } else {
+      depth_pub_->publish(black_image_like(image));
       if (have_camera_info_) {
         auto info = latest_camera_info_;
         info.header = image.header;
         camera_info_pub_->publish(info);
       }
-      return;
-    } else {
       return;
     }
 
