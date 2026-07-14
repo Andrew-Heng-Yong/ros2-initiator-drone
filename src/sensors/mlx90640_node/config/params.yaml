@@ -17,11 +17,11 @@ thermal_cropper_node:
     output_camera_info_topic: /camera/depth/cropped/camera_info
     output_roi_topic: /thermal/crop_region
     enabled: true
-    crop_unit_thermal_pixels: 1
-    min_region_size: 4
-    inflation_radius_thermal_pixels: 1
-    highlight_min_temp: 30.0
-    highlight_max_temp: 120.0
+    crop_unit_thermal_pixels: 2
+    min_region_size: 20
+    inflation_radius_thermal_pixels: 0
+    highlight_min_temp: 25.0
+    highlight_max_temp: 40.0
     highlight_min_delta_from_frame_low: 3.0
     highlight_max_delta_from_frame_high: 1000.0
     depth_fov_horizontal: 67.0

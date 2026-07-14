@@ -23,6 +23,13 @@ def generate_launch_description():
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
+    crop_unit_thermal_pixels = LaunchConfiguration('crop_unit_thermal_pixels')
+    min_region_size = LaunchConfiguration('min_region_size')
+    inflation_radius_thermal_pixels = LaunchConfiguration('inflation_radius_thermal_pixels')
+    highlight_min_temp = LaunchConfiguration('highlight_min_temp')
+    highlight_max_temp = LaunchConfiguration('highlight_max_temp')
+    highlight_min_delta_from_frame_low = LaunchConfiguration('highlight_min_delta_from_frame_low')
+    highlight_max_delta_from_frame_high = LaunchConfiguration('highlight_max_delta_from_frame_high')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -49,6 +56,41 @@ def generate_launch_description():
             'overlay_alpha',
             default_value='0.45',
             description='Thermal overlay opacity, from 0.0 to 1.0.',
+        ),
+        DeclareLaunchArgument(
+            'crop_unit_thermal_pixels',
+            default_value='2',
+            description='Thermal-pixel square size for one cropper analysis unit.',
+        ),
+        DeclareLaunchArgument(
+            'min_region_size',
+            default_value='20',
+            description='Minimum neighboring highlighted thermal-unit cluster size.',
+        ),
+        DeclareLaunchArgument(
+            'inflation_radius_thermal_pixels',
+            default_value='0',
+            description='Cropper mask inflation radius in thermal pixels.',
+        ),
+        DeclareLaunchArgument(
+            'highlight_min_temp',
+            default_value='25.0',
+            description='Minimum absolute thermal value for a highlighted pixel.',
+        ),
+        DeclareLaunchArgument(
+            'highlight_max_temp',
+            default_value='40.0',
+            description='Maximum absolute thermal value for a highlighted pixel.',
+        ),
+        DeclareLaunchArgument(
+            'highlight_min_delta_from_frame_low',
+            default_value='3.0',
+            description='Minimum delta above the current frame low for a highlighted pixel.',
+        ),
+        DeclareLaunchArgument(
+            'highlight_max_delta_from_frame_high',
+            default_value='1000.0',
+            description='Maximum delta below the current frame high for a highlighted pixel.',
         ),
         ExecuteProcess(
             cmd=[
@@ -85,7 +127,15 @@ def generate_launch_description():
             name='thermal_cropper_node',
             output='screen',
             condition=IfCondition(start_thermal_cropper),
-            parameters=[mlx90640_params],
+            parameters=[mlx90640_params, {
+                'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
+                'min_region_size': ParameterValue(min_region_size, value_type=int),
+                'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),
+                'highlight_min_temp': ParameterValue(highlight_min_temp, value_type=float),
+                'highlight_max_temp': ParameterValue(highlight_max_temp, value_type=float),
+                'highlight_min_delta_from_frame_low': ParameterValue(highlight_min_delta_from_frame_low, value_type=float),
+                'highlight_max_delta_from_frame_high': ParameterValue(highlight_max_delta_from_frame_high, value_type=float),
+            }],
         ),
         Node(
             package='mlx90640_node',
