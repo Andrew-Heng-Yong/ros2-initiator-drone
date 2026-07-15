@@ -25,6 +25,7 @@ def generate_launch_description():
     start_imu = LaunchConfiguration('start_imu')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
+    thermal_cropper_enabled = LaunchConfiguration('thermal_cropper_enabled')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
     crop_unit_thermal_pixels = LaunchConfiguration('crop_unit_thermal_pixels')
     min_region_size = LaunchConfiguration('min_region_size')
@@ -59,6 +60,11 @@ def generate_launch_description():
             'start_thermal_cropper',
             default_value='false',
             description='Start the thermal-guided depth cropper node.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_cropper_enabled',
+            default_value='true',
+            description='Enable thermal-guided masking in the cropper node at startup.',
         ),
         DeclareLaunchArgument(
             'overlay_alpha',
@@ -136,6 +142,7 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(start_thermal_cropper),
             parameters=[mlx90640_params, {
+                'enabled': ParameterValue(thermal_cropper_enabled, value_type=bool),
                 'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
                 'min_region_size': ParameterValue(min_region_size, value_type=int),
                 'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),

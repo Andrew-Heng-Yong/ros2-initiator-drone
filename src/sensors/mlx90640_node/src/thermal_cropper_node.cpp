@@ -281,6 +281,8 @@ private:
     if (have_crop_) {
       thermal_pub_->publish(mask_image_by_pixel_mask(
         image, latest_thermal_mask_, latest_thermal_width_, latest_thermal_height_));
+    } else if (passthrough_when_no_region_) {
+      thermal_pub_->publish(image);
     } else {
       thermal_pub_->publish(black_image_like(image));
       latest_thermal_mask_.clear();
@@ -304,7 +306,7 @@ private:
     if (have_crop_) {
       roi = thermal_to_depth_roi(latest_crop_, static_cast<int>(image.width), static_cast<int>(image.height));
     } else {
-      depth_pub_->publish(black_image_like(image));
+      depth_pub_->publish(passthrough_when_no_region_ ? image : black_image_like(image));
       if (have_camera_info_) {
         auto info = latest_camera_info_;
         info.header = image.header;
