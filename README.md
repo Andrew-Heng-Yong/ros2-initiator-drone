@@ -4,12 +4,13 @@ This workspace is split into a top-level control package and sensor packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
 - `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
+- `src/sensors/mpu6050_node`: C++ ROS 2 driver for an MPU6050 accelerometer/gyroscope over Linux I2C.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
 ## Run on the Raspberry Pi
 
-Verify the sensor is visible, normally at `0x33`:
+Verify the thermal sensor is visible, normally at `0x33`, and the MPU6050 is visible at `0x68`:
 
 ```bash
 sudo i2cdetect -y 1
@@ -53,6 +54,12 @@ ros2 launch drone_control drone_launch.py start_rosbridge:=true
 
 The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. When the Orbbec camera is enabled, the launch starts depth first and waits for the first depth topic before starting the MLX90640 node, so thermal only appears as an overlay source after the depth stream is running.
 
+To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defaults to `/dev/i2c-1`, address `0x68`, publishes raw IMU samples on `/imu/data_raw`, and publishes the chip temperature on `/imu/temperature`:
+
+```bash
+ros2 launch drone_control drone_launch.py start_imu:=true
+```
+
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:
 
@@ -80,6 +87,12 @@ The thermal node publishes calibrated Celsius pixels as `sensor_msgs/Image` (`32
 
 ```bash
 ros2 run mlx90640_node mlx90640_node --ros-args --params-file src/sensors/mlx90640_node/config/params.yaml
+```
+
+For direct MPU6050 testing:
+
+```bash
+ros2 launch mpu6050_node mpu6050_launch.py
 ```
 
 The executing user must be permitted to open `/dev/i2c-1`, usually by membership in the `i2c` group. The `python3-smbus`, `i2c-tools`, CircuitPython, and `rpi-lgpio` installations are not required by this C++ node.

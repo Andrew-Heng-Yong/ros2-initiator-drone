@@ -1,16 +1,13 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>drone_control</name>
+  <name>mpu6050_node</name>
   <version>0.1.0</version>
-  <description>Top-level launch and orchestration package for the initiator drone.</description>
+  <description>Linux I2C ROS 2 driver for the MPU6050 accelerometer and gyroscope.</description>
   <maintainer email="user@example.com">Workspace maintainer</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>
-  <exec_depend>launch</exec_depend>
-  <exec_depend>launch_ros</exec_depend>
-  <exec_depend>mlx90640_node</exec_depend>
-  <exec_depend>mpu6050_node</exec_depend>
-  <exec_depend>rosbridge_server</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

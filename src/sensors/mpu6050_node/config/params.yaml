@@ -1,0 +1,10 @@
+mpu6050_node:
+  ros__parameters:
+    i2c_device: /dev/i2c-1
+    i2c_address: 104      # 0x68
+    frame_id: mpu6050_link
+    imu_topic: /imu/data_raw
+    temperature_topic: /imu/temperature
+    publish_rate_hz: 100.0
+    gyro_range_dps: 250
+    accel_range_g: 2

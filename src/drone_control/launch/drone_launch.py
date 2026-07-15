@@ -18,8 +18,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     mlx90640_share = get_package_share_directory('mlx90640_node')
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
+    mpu6050_share = get_package_share_directory('mpu6050_node')
+    mpu6050_params = os.path.join(mpu6050_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
+    start_imu = LaunchConfiguration('start_imu')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
@@ -41,6 +44,11 @@ def generate_launch_description():
             'start_depth_camera',
             default_value='false',
             description='Start the Orbbec depth camera driver.',
+        ),
+        DeclareLaunchArgument(
+            'start_imu',
+            default_value='false',
+            description='Start the MPU6050 IMU driver.',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',
@@ -153,6 +161,14 @@ def generate_launch_description():
                 'thermal_hfov_deg': 55.0,
                 'thermal_vfov_deg': 35.0,
             }],
+        ),
+        Node(
+            package='mpu6050_node',
+            executable='mpu6050_node',
+            name='mpu6050_node',
+            output='screen',
+            condition=IfCondition(start_imu),
+            parameters=[mpu6050_params],
         ),
         Node(
             package='rosbridge_server',
