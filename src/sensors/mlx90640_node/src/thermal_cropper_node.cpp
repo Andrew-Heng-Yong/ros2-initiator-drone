@@ -107,40 +107,28 @@ sensor_msgs::msg::Image black_image_like(const sensor_msgs::msg::Image & image)
   return output;
 }
 
-sensor_msgs::msg::Image crop_image_region(
+sensor_msgs::msg::Image mask_image_by_pixel_mask(
   const sensor_msgs::msg::Image & image,
-  const CropRegion & roi)
+  const std::vector<uint8_t> & mask)
 {
   const int bpp = bytes_per_pixel(image);
-  const int image_width = static_cast<int>(image.width);
-  const int image_height = static_cast<int>(image.height);
-  if (bpp <= 0 || image_width <= 0 || image_height <= 0) {
+  const auto pixel_count = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+  if (bpp <= 0 || mask.size() != pixel_count) {
     return black_image_like(image);
   }
 
-  const int left = std::clamp(roi.x, 0, image_width - 1);
-  const int top = std::clamp(roi.y, 0, image_height - 1);
-  const int width = std::clamp(roi.width, 1, image_width - left);
-  const int height = std::clamp(roi.height, 1, image_height - top);
-
   auto output = image;
-  output.width = static_cast<uint32_t>(width);
-  output.height = static_cast<uint32_t>(height);
-  output.step = static_cast<sensor_msgs::msg::Image::_step_type>(width * bpp);
-  output.data.assign(static_cast<size_t>(output.step) * static_cast<size_t>(height), 0);
-
-  for (int y = 0; y < height; ++y) {
-    const auto source = static_cast<size_t>(top + y) * image.step + static_cast<size_t>(left) * bpp;
-    const auto target = static_cast<size_t>(y) * output.step;
-    const auto bytes = static_cast<size_t>(width * bpp);
-    if (source + bytes <= image.data.size() && target + bytes <= output.data.size()) {
-      std::copy_n(
-        image.data.begin() + static_cast<long>(source),
-        bytes,
-        output.data.begin() + static_cast<long>(target));
+  for (uint32_t y = 0; y < image.height; ++y) {
+    for (uint32_t x = 0; x < image.width; ++x) {
+      if (mask[static_cast<size_t>(y) * image.width + x]) {
+        continue;
+      }
+      const auto offset = static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
+      if (offset + static_cast<size_t>(bpp) <= output.data.size()) {
+        std::fill_n(output.data.begin() + static_cast<long>(offset), bpp, 0);
+      }
     }
   }
-
   return output;
 }
 
@@ -149,17 +137,11 @@ sensor_msgs::msg::CameraInfo mask_camera_info(
   const CropRegion & roi)
 {
   auto output = info;
-  output.width = static_cast<uint32_t>(roi.width);
-  output.height = static_cast<uint32_t>(roi.height);
   output.roi.x_offset = static_cast<uint32_t>(roi.x);
   output.roi.y_offset = static_cast<uint32_t>(roi.y);
   output.roi.width = static_cast<uint32_t>(roi.width);
   output.roi.height = static_cast<uint32_t>(roi.height);
   output.roi.do_rectify = false;
-  output.k[2] -= static_cast<double>(roi.x);
-  output.k[5] -= static_cast<double>(roi.y);
-  output.p[2] -= static_cast<double>(roi.x);
-  output.p[6] -= static_cast<double>(roi.y);
   return output;
 }
 
@@ -286,17 +268,19 @@ private:
     }
     latest_thermal_width_ = static_cast<int>(image.width);
     latest_thermal_height_ = static_cast<int>(image.height);
+    const auto previous_mask = latest_thermal_mask_;
     const auto detected_crop = detect_crop(image);
     const bool detected = detected_crop.width > 0 && detected_crop.height > 0;
     if (detected) {
       latest_crop_ = detected_crop;
       have_crop_ = true;
-      thermal_pub_->publish(crop_image_region(image, latest_crop_));
+      thermal_pub_->publish(mask_image_by_pixel_mask(image, latest_thermal_mask_));
     } else if (passthrough_when_no_region_) {
       have_crop_ = false;
       thermal_pub_->publish(image);
     } else if (have_crop_) {
-      thermal_pub_->publish(crop_image_region(image, latest_crop_));
+      latest_thermal_mask_ = previous_mask;
+      thermal_pub_->publish(mask_image_by_pixel_mask(image, latest_thermal_mask_));
     }
   }
 
@@ -333,7 +317,7 @@ private:
     roi.width = std::clamp(roi.width, 1, static_cast<int>(image.width) - roi.x);
     roi.height = std::clamp(roi.height, 1, static_cast<int>(image.height) - roi.y);
 
-    depth_pub_->publish(crop_image_region(image, roi));
+    depth_pub_->publish(mask_depth_by_thermal_mask(image));
     if (have_camera_info_) {
       auto info = mask_camera_info(latest_camera_info_, roi);
       info.header = image.header;
@@ -524,6 +508,61 @@ private:
       return false;
     }
     return true;
+  }
+
+  sensor_msgs::msg::Image mask_depth_by_thermal_mask(
+    const sensor_msgs::msg::Image & image) const
+  {
+    const int bpp = bytes_per_pixel(image);
+    const int depth_width = static_cast<int>(image.width);
+    const int depth_height = static_cast<int>(image.height);
+    const int thermal_width = latest_thermal_width_;
+    const int thermal_height = latest_thermal_height_;
+    if (
+      bpp <= 0 || depth_width <= 0 || depth_height <= 0 || thermal_width <= 0 ||
+      thermal_height <= 0 || latest_thermal_mask_.size() !=
+      static_cast<size_t>(thermal_width * thermal_height))
+    {
+      return black_image_like(image);
+    }
+
+    const double depth_fraction_x = fov_fraction(thermal_hfov_deg_, depth_hfov_deg_) *
+      thermal_scale_ * thermal_stretch_x_;
+    const double depth_fraction_y = fov_fraction(thermal_vfov_deg_, depth_vfov_deg_) *
+      thermal_scale_ * thermal_stretch_y_;
+    const int window_width = std::max(
+      thermal_width, static_cast<int>(std::round(depth_width * depth_fraction_x)));
+    const int window_height = std::max(
+      thermal_height, static_cast<int>(std::round(depth_height * depth_fraction_y)));
+    const int window_left = static_cast<int>(
+      std::round((depth_width - window_width) / 2.0 + thermal_offset_x_));
+    const int window_top = static_cast<int>(
+      std::round((depth_height - window_height) / 2.0 + thermal_offset_y_));
+
+    auto output = image;
+    for (int y = 0; y < depth_height; ++y) {
+      const int display_y = static_cast<int>(std::floor(
+        (y - window_top) * thermal_height / static_cast<double>(window_height)));
+      for (int x = 0; x < depth_width; ++x) {
+        const int display_x = static_cast<int>(std::floor(
+          (x - window_left) * thermal_width / static_cast<double>(window_width)));
+        bool selected = display_x >= 0 && display_x < thermal_width &&
+          display_y >= 0 && display_y < thermal_height;
+        if (selected) {
+          const int thermal_x = flip_thermal_x_ ? thermal_width - 1 - display_x : display_x;
+          selected = latest_thermal_mask_[static_cast<size_t>(
+            display_y * thermal_width + thermal_x)] != 0;
+        }
+        if (selected) {
+          continue;
+        }
+        const auto offset = static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
+        if (offset + static_cast<size_t>(bpp) <= output.data.size()) {
+          std::fill_n(output.data.begin() + static_cast<long>(offset), bpp, 0);
+        }
+      }
+    }
+    return output;
   }
 
   CropRegion thermal_to_depth_roi(const CropRegion & thermal, int depth_width, int depth_height) const
