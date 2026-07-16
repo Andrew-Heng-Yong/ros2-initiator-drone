@@ -26,6 +26,7 @@ def generate_launch_description():
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_cropper_enabled = LaunchConfiguration('thermal_cropper_enabled')
+    passthrough_when_no_region = LaunchConfiguration('passthrough_when_no_region')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
     crop_unit_thermal_pixels = LaunchConfiguration('crop_unit_thermal_pixels')
     min_region_size = LaunchConfiguration('min_region_size')
@@ -67,6 +68,11 @@ def generate_launch_description():
             description='Enable thermal-guided masking in the cropper node at startup.',
         ),
         DeclareLaunchArgument(
+            'passthrough_when_no_region',
+            default_value='true',
+            description='Publish uncropped frames while no thermal crop region is available.',
+        ),
+        DeclareLaunchArgument(
             'overlay_alpha',
             default_value='0.45',
             description='Thermal overlay opacity, from 0.0 to 1.0.',
@@ -78,7 +84,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'min_region_size',
-            default_value='20',
+            default_value='4',
             description='Minimum neighboring highlighted thermal-unit cluster size.',
         ),
         DeclareLaunchArgument(
@@ -143,6 +149,7 @@ def generate_launch_description():
             condition=IfCondition(start_thermal_cropper),
             parameters=[mlx90640_params, {
                 'enabled': ParameterValue(thermal_cropper_enabled, value_type=bool),
+                'passthrough_when_no_region': ParameterValue(passthrough_when_no_region, value_type=bool),
                 'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
                 'min_region_size': ParameterValue(min_region_size, value_type=int),
                 'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),

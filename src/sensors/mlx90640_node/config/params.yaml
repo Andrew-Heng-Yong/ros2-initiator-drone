@@ -18,7 +18,7 @@ thermal_cropper_node:
     output_roi_topic: /thermal/crop_region
     enabled: true
     crop_unit_thermal_pixels: 2
-    min_region_size: 20
+    min_region_size: 4
     inflation_radius_thermal_pixels: 0
     highlight_min_temp: 25.0
     highlight_max_temp: 40.0

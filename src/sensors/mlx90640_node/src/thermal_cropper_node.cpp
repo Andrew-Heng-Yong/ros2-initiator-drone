@@ -234,6 +234,13 @@ public:
       [this](const std::vector<rclcpp::Parameter> & parameters) {
         return on_parameters(parameters);
       });
+
+    RCLCPP_INFO(
+      get_logger(),
+      "Thermal cropper enabled=%s passthrough_when_no_region=%s min_region_size=%d",
+      enabled_ ? "true" : "false",
+      passthrough_when_no_region_ ? "true" : "false",
+      min_region_size_);
   }
 
 private:
@@ -286,7 +293,6 @@ private:
     } else if (passthrough_when_no_region_) {
       thermal_pub_->publish(image);
     } else {
-      thermal_pub_->publish(black_image_like(image));
       latest_thermal_mask_.clear();
     }
   }
@@ -308,8 +314,10 @@ private:
     if (have_crop_) {
       roi = thermal_to_depth_roi(latest_crop_, static_cast<int>(image.width), static_cast<int>(image.height));
     } else {
-      depth_pub_->publish(passthrough_when_no_region_ ? image : black_image_like(image));
-      if (have_camera_info_) {
+      if (passthrough_when_no_region_) {
+        depth_pub_->publish(image);
+      }
+      if (passthrough_when_no_region_ && have_camera_info_) {
         auto info = latest_camera_info_;
         info.header = image.header;
         camera_info_pub_->publish(info);
