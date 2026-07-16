@@ -286,14 +286,17 @@ private:
     }
     latest_thermal_width_ = static_cast<int>(image.width);
     latest_thermal_height_ = static_cast<int>(image.height);
-    latest_crop_ = detect_crop(image);
-    have_crop_ = latest_crop_.width > 0 && latest_crop_.height > 0;
-    if (have_crop_) {
+    const auto detected_crop = detect_crop(image);
+    const bool detected = detected_crop.width > 0 && detected_crop.height > 0;
+    if (detected) {
+      latest_crop_ = detected_crop;
+      have_crop_ = true;
       thermal_pub_->publish(crop_image_region(image, latest_crop_));
     } else if (passthrough_when_no_region_) {
+      have_crop_ = false;
       thermal_pub_->publish(image);
-    } else {
-      latest_thermal_mask_.clear();
+    } else if (have_crop_) {
+      thermal_pub_->publish(crop_image_region(image, latest_crop_));
     }
   }
 
