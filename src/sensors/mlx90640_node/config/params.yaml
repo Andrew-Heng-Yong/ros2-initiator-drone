@@ -2,7 +2,7 @@ mlx90640_node:
   ros__parameters:
     i2c_device: /dev/i2c-1
     i2c_address: 51       # 0x33
-    refresh_rate: 4       # MLX code: 0.5, 1, 2, 4, 8, 16, 32, or 64 Hz
+    refresh_rate: 5       # Code 5: 16 Hz subpages, about 8 complete frames/s
     emissivity: 0.95
     frame_id: mlx90640_optical_frame
     topic: thermal/image_raw

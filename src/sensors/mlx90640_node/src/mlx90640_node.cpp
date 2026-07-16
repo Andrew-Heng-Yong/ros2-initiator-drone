@@ -22,7 +22,7 @@ class Mlx90640Node final : public rclcpp::Node {
   Mlx90640Node() : Node("mlx90640_node") {
     device_ = declare_parameter<std::string>("i2c_device", "/dev/i2c-1");
     address_ = declare_parameter<int>("i2c_address", 0x33);
-    refresh_rate_ = declare_parameter<int>("refresh_rate", 4);
+    refresh_rate_ = declare_parameter<int>("refresh_rate", 5);
     emissivity_ = declare_parameter<double>("emissivity", 0.95);
     frame_id_ = declare_parameter<std::string>("frame_id", "mlx90640_optical_frame");
     topic_ = declare_parameter<std::string>("topic", "thermal/image_raw");
@@ -46,7 +46,10 @@ class Mlx90640Node final : public rclcpp::Node {
     const auto period = std::chrono::duration<double>(1.0 / refresh_hz(refresh_rate_));
     timer_ = create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(period),
                                std::bind(&Mlx90640Node::publish_frame, this));
-    RCLCPP_INFO(get_logger(), "MLX90640 on %s at 0x%02X; publishing %s", device_.c_str(), address_, topic_.c_str());
+    RCLCPP_INFO(
+      get_logger(),
+      "MLX90640 on %s at 0x%02X; publishing %s at %.1f complete frames/s",
+      device_.c_str(), address_, topic_.c_str(), refresh_hz(refresh_rate_) / 2.0);
   }
 
  private:
@@ -80,6 +83,7 @@ class Mlx90640Node final : public rclcpp::Node {
     image.data.resize(temperature_image_.size() * sizeof(float));
     std::memcpy(image.data.data(), temperature_image_.data(), image.data.size());
     image_publisher_->publish(image);
+    received_subpage_ = {{false, false}};
     sensor_msgs::msg::Temperature ambient_message;
     ambient_message.header = image.header; ambient_message.temperature = ambient; ambient_message.variance = 0.0;
     ambient_publisher_->publish(ambient_message);
