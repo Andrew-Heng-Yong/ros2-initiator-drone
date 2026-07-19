@@ -19,7 +19,7 @@ target_compile_features(mi0802_frame_utils PUBLIC cxx_std_17)
 target_include_directories(mi0802_frame_utils PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_link_libraries(mi0802_frame_utils PUBLIC mi0802_protocol Threads::Threads)
+target_link_libraries(mi0802_frame_utils mi0802_protocol Threads::Threads)
 ament_target_dependencies(mi0802_frame_utils builtin_interfaces sensor_msgs)
 target_compile_options(mi0802_frame_utils PRIVATE -Wall -Wextra -Wpedantic)
 

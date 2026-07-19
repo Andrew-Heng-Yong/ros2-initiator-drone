@@ -15,6 +15,7 @@ sudo usermod -aG dialout "$USER"
 Build and launch:
 
 ```bash
+deactivate 2>/dev/null || true  # Build with the system Python used by ROS 2.
 source /opt/ros/jazzy/setup.bash
 colcon build --packages-up-to mi0802_senxor_driver
 source install/setup.bash
