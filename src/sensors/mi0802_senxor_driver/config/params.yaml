@@ -1,0 +1,10 @@
+mi0802_senxor_node:
+  ros__parameters:
+    device: /dev/ttyACM0
+    frame_id: mi0802_thermal_optical_frame
+    topic_name: /thermal/image_raw
+    reconnect_delay_sec: 2.0
+    publish_rate_limit: 0.0
+    flip_horizontal: false
+    flip_vertical: false
+    rotate_180: false

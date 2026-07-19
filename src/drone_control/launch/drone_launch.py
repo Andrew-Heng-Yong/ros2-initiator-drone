@@ -16,6 +16,8 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
+    mi0802_share = get_package_share_directory('mi0802_senxor_driver')
+    mi0802_params = os.path.join(mi0802_share, 'config', 'params.yaml')
     mlx90640_share = get_package_share_directory('mlx90640_node')
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     mpu6050_share = get_package_share_directory('mpu6050_node')
@@ -25,6 +27,7 @@ def generate_launch_description():
     start_imu = LaunchConfiguration('start_imu')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
+    thermal_device = LaunchConfiguration('thermal_device')
     thermal_cropper_enabled = LaunchConfiguration('thermal_cropper_enabled')
     passthrough_when_no_region = LaunchConfiguration('passthrough_when_no_region')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
@@ -61,6 +64,11 @@ def generate_launch_description():
             'start_thermal_cropper',
             default_value='false',
             description='Start the thermal-guided depth cropper node.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_device',
+            default_value='/dev/ttyACM0',
+            description='MI0802 USB CDC ACM device path.',
         ),
         DeclareLaunchArgument(
             'thermal_cropper_enabled',
@@ -128,15 +136,18 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'bash', '-lc',
-                'for attempt in $(seq 1 30); do '
-                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 && break; '
-                'echo "Waiting for depth topic /camera/depth/image_raw..."; '
-                'sleep 1; '
-                'done; '
-                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 || '
-                '(echo "Timed out waiting for depth topic /camera/depth/image_raw"; exit 1); '
-                f'exec ros2 run mlx90640_node mlx90640_node --ros-args '
-                f'--params-file "{mlx90640_params}"',
+                [
+                    'for attempt in $(seq 1 30); do '
+                    'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 && break; '
+                    'echo "Waiting for depth topic /camera/depth/image_raw..."; '
+                    'sleep 1; '
+                    'done; '
+                    'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 || '
+                    '(echo "Timed out waiting for depth topic /camera/depth/image_raw"; exit 1); '
+                    f'exec ros2 run mi0802_senxor_driver mi0802_senxor_node --ros-args '
+                    f'--params-file "{mi0802_params}" -p device:=',
+                    thermal_device,
+                ],
             ],
             output='screen',
             condition=IfCondition(start_depth_camera),
