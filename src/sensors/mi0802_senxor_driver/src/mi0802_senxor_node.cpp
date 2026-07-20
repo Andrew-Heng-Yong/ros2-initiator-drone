@@ -90,7 +90,7 @@ private:
             continue;
           }
           auto values = orient_frame(frame, flip_horizontal_, flip_vertical_, rotate_180_);
-          publisher_->publish(make_image(values, now().to_msg(), frame_id_));
+          publisher_->publish(make_image(values, now(), frame_id_));
         }
       } catch (const std::exception & error) {
         RCLCPP_ERROR_THROTTLE(
