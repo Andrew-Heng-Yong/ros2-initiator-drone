@@ -24,14 +24,15 @@ thermal_cropper_node:
     highlight_max_temp: 40.0
     highlight_min_delta_from_frame_low: 3.0
     highlight_max_delta_from_frame_high: 1000.0
-    depth_fov_horizontal: 67.0
-    depth_fov_vertical: 53.6
-    thermal_fov_horizontal: 55.0
-    thermal_fov_vertical: 35.0
-    thermal_offset_x: 10.0
+    depth_fov_horizontal: 79.0
+    depth_fov_vertical: 62.0
+    thermal_fov_horizontal: 90.0
+    thermal_fov_vertical: 68.0
+    thermal_offset_x: 0.0
     thermal_offset_y: 0.0
-    thermal_scale: 0.8
+    thermal_scale: 1.0
     thermal_stretch_x: 0.8
-    thermal_stretch_y: 1.0
+    thermal_stretch_y: 0.9
     flip_thermal_x: true
+    flip_thermal_y: false
     passthrough_when_no_region: true

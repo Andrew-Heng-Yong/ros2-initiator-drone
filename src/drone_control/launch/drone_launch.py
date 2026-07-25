@@ -38,6 +38,17 @@ def generate_launch_description():
     highlight_max_temp = LaunchConfiguration('highlight_max_temp')
     highlight_min_delta_from_frame_low = LaunchConfiguration('highlight_min_delta_from_frame_low')
     highlight_max_delta_from_frame_high = LaunchConfiguration('highlight_max_delta_from_frame_high')
+    depth_fov_horizontal = LaunchConfiguration('depth_fov_horizontal')
+    depth_fov_vertical = LaunchConfiguration('depth_fov_vertical')
+    thermal_fov_horizontal = LaunchConfiguration('thermal_fov_horizontal')
+    thermal_fov_vertical = LaunchConfiguration('thermal_fov_vertical')
+    thermal_offset_x = LaunchConfiguration('thermal_offset_x')
+    thermal_offset_y = LaunchConfiguration('thermal_offset_y')
+    thermal_scale = LaunchConfiguration('thermal_scale')
+    thermal_stretch_x = LaunchConfiguration('thermal_stretch_x')
+    thermal_stretch_y = LaunchConfiguration('thermal_stretch_y')
+    flip_thermal_x = LaunchConfiguration('flip_thermal_x')
+    flip_thermal_y = LaunchConfiguration('flip_thermal_y')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -120,6 +131,61 @@ def generate_launch_description():
             default_value='1000.0',
             description='Maximum delta below the current frame high for a highlighted pixel.',
         ),
+        DeclareLaunchArgument(
+            'depth_fov_horizontal',
+            default_value='79.0',
+            description='Depth camera horizontal field of view in degrees.',
+        ),
+        DeclareLaunchArgument(
+            'depth_fov_vertical',
+            default_value='62.0',
+            description='Depth camera vertical field of view in degrees.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_fov_horizontal',
+            default_value='90.0',
+            description='Thermal camera horizontal field of view in degrees.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_fov_vertical',
+            default_value='68.0',
+            description='Thermal camera vertical field of view in degrees.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_offset_x',
+            default_value='0.0',
+            description='Thermal-to-depth horizontal offset in depth pixels.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_offset_y',
+            default_value='0.0',
+            description='Thermal-to-depth vertical offset in depth pixels.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_scale',
+            default_value='1.0',
+            description='Uniform thermal-to-depth overlay scale.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_stretch_x',
+            default_value='0.8',
+            description='Horizontal thermal-to-depth overlay stretch.',
+        ),
+        DeclareLaunchArgument(
+            'thermal_stretch_y',
+            default_value='0.9',
+            description='Vertical thermal-to-depth overlay stretch.',
+        ),
+        DeclareLaunchArgument(
+            'flip_thermal_x',
+            default_value='true',
+            description='Flip thermal coordinates horizontally.',
+        ),
+        DeclareLaunchArgument(
+            'flip_thermal_y',
+            default_value='false',
+            description='Flip thermal coordinates vertically.',
+        ),
         ExecuteProcess(
             cmd=[
                 'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
@@ -168,6 +234,17 @@ def generate_launch_description():
                 'highlight_max_temp': ParameterValue(highlight_max_temp, value_type=float),
                 'highlight_min_delta_from_frame_low': ParameterValue(highlight_min_delta_from_frame_low, value_type=float),
                 'highlight_max_delta_from_frame_high': ParameterValue(highlight_max_delta_from_frame_high, value_type=float),
+                'depth_fov_horizontal': ParameterValue(depth_fov_horizontal, value_type=float),
+                'depth_fov_vertical': ParameterValue(depth_fov_vertical, value_type=float),
+                'thermal_fov_horizontal': ParameterValue(thermal_fov_horizontal, value_type=float),
+                'thermal_fov_vertical': ParameterValue(thermal_fov_vertical, value_type=float),
+                'thermal_offset_x': ParameterValue(thermal_offset_x, value_type=float),
+                'thermal_offset_y': ParameterValue(thermal_offset_y, value_type=float),
+                'thermal_scale': ParameterValue(thermal_scale, value_type=float),
+                'thermal_stretch_x': ParameterValue(thermal_stretch_x, value_type=float),
+                'thermal_stretch_y': ParameterValue(thermal_stretch_y, value_type=float),
+                'flip_thermal_x': ParameterValue(flip_thermal_x, value_type=bool),
+                'flip_thermal_y': ParameterValue(flip_thermal_y, value_type=bool),
             }],
         ),
         Node(

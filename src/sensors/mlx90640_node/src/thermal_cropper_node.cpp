@@ -178,16 +178,17 @@ public:
     highlight_max_delta_from_frame_high_ = declare_parameter<double>(
       "highlight_max_delta_from_frame_high", 1000.0);
 
-    depth_hfov_deg_ = declare_parameter<double>("depth_fov_horizontal", 67.0);
-    depth_vfov_deg_ = declare_parameter<double>("depth_fov_vertical", 53.6);
-    thermal_hfov_deg_ = declare_parameter<double>("thermal_fov_horizontal", 55.0);
-    thermal_vfov_deg_ = declare_parameter<double>("thermal_fov_vertical", 35.0);
-    thermal_offset_x_ = declare_parameter<double>("thermal_offset_x", 10.0);
+    depth_hfov_deg_ = declare_parameter<double>("depth_fov_horizontal", 79.0);
+    depth_vfov_deg_ = declare_parameter<double>("depth_fov_vertical", 62.0);
+    thermal_hfov_deg_ = declare_parameter<double>("thermal_fov_horizontal", 90.0);
+    thermal_vfov_deg_ = declare_parameter<double>("thermal_fov_vertical", 68.0);
+    thermal_offset_x_ = declare_parameter<double>("thermal_offset_x", 0.0);
     thermal_offset_y_ = declare_parameter<double>("thermal_offset_y", 0.0);
-    thermal_scale_ = declare_parameter<double>("thermal_scale", 0.8);
+    thermal_scale_ = declare_parameter<double>("thermal_scale", 1.0);
     thermal_stretch_x_ = declare_parameter<double>("thermal_stretch_x", 0.8);
-    thermal_stretch_y_ = declare_parameter<double>("thermal_stretch_y", 1.0);
+    thermal_stretch_y_ = declare_parameter<double>("thermal_stretch_y", 0.9);
     flip_thermal_x_ = declare_parameter<bool>("flip_thermal_x", true);
+    flip_thermal_y_ = declare_parameter<bool>("flip_thermal_y", false);
     passthrough_when_no_region_ = declare_parameter<bool>("passthrough_when_no_region", true);
 
     depth_pub_ = create_publisher<sensor_msgs::msg::Image>(output_depth_topic_, 10);
@@ -550,8 +551,9 @@ private:
           display_y >= 0 && display_y < thermal_height;
         if (selected) {
           const int thermal_x = flip_thermal_x_ ? thermal_width - 1 - display_x : display_x;
+          const int thermal_y = flip_thermal_y_ ? thermal_height - 1 - display_y : display_y;
           selected = latest_thermal_mask_[static_cast<size_t>(
-            display_y * thermal_width + thermal_x)] != 0;
+            thermal_y * thermal_width + thermal_x)] != 0;
         }
         if (selected) {
           continue;
@@ -583,12 +585,15 @@ private:
     const int display_x = flip_thermal_x_ ?
       latest_thermal_width_ - thermal.x - thermal.width :
       thermal.x;
+    const int display_y = flip_thermal_y_ ?
+      latest_thermal_height_ - thermal.y - thermal.height :
+      thermal.y;
     return {
       static_cast<int>(std::round(
         thermal_window_left + display_x * thermal_window_width /
         static_cast<double>(std::max(1, latest_thermal_width_)))),
       static_cast<int>(std::round(
-        thermal_window_top + thermal.y * thermal_window_height /
+        thermal_window_top + display_y * thermal_window_height /
         static_cast<double>(std::max(1, latest_thermal_height_)))),
       std::max(1, static_cast<int>(std::round(
         thermal.width * thermal_window_width /
@@ -605,7 +610,7 @@ private:
     constexpr double k_pi = 3.14159265358979323846;
     const double inner = std::tan((inner_degrees * k_pi / 180.0) / 2.0);
     const double outer = std::tan((outer_degrees * k_pi / 180.0) / 2.0);
-    return outer > 0.0 ? std::clamp(inner / outer, 0.0, 1.0) : 1.0;
+    return outer > 0.0 ? std::max(0.0, inner / outer) : 1.0;
   }
 
   std::string depth_topic_;
@@ -623,16 +628,17 @@ private:
   double highlight_max_temp_ = 120.0;
   double highlight_min_delta_from_frame_low_ = 3.0;
   double highlight_max_delta_from_frame_high_ = 1000.0;
-  double depth_hfov_deg_ = 67.0;
-  double depth_vfov_deg_ = 53.6;
-  double thermal_hfov_deg_ = 55.0;
-  double thermal_vfov_deg_ = 35.0;
-  double thermal_offset_x_ = 10.0;
+  double depth_hfov_deg_ = 79.0;
+  double depth_vfov_deg_ = 62.0;
+  double thermal_hfov_deg_ = 90.0;
+  double thermal_vfov_deg_ = 68.0;
+  double thermal_offset_x_ = 0.0;
   double thermal_offset_y_ = 0.0;
-  double thermal_scale_ = 0.8;
+  double thermal_scale_ = 1.0;
   double thermal_stretch_x_ = 0.8;
-  double thermal_stretch_y_ = 1.0;
+  double thermal_stretch_y_ = 0.9;
   bool flip_thermal_x_ = true;
+  bool flip_thermal_y_ = false;
   bool passthrough_when_no_region_ = true;
   bool enabled_ = true;
 
