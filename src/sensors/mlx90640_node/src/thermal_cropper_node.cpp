@@ -185,6 +185,7 @@ public:
     thermal_offset_x_ = declare_parameter<double>("thermal_offset_x", 0.0);
     thermal_offset_y_ = declare_parameter<double>("thermal_offset_y", 0.0);
     thermal_scale_ = declare_parameter<double>("thermal_scale", 1.0);
+    thermal_barrel_distortion_ = declare_parameter<double>("thermal_barrel_distortion", 0.0);
     thermal_stretch_x_ = declare_parameter<double>("thermal_stretch_x", 0.8);
     thermal_stretch_y_ = declare_parameter<double>("thermal_stretch_y", 0.9);
     flip_thermal_x_ = declare_parameter<bool>("flip_thermal_x", true);
@@ -220,16 +221,19 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "Thermal cropper enabled=%s passthrough_when_no_region=%s min_region_size=%d",
+      "Thermal cropper enabled=%s passthrough_when_no_region=%s min_region_size=%d "
+      "barrel_distortion=%.3f",
       enabled_ ? "true" : "false",
       passthrough_when_no_region_ ? "true" : "false",
-      min_region_size_);
+      min_region_size_,
+      thermal_barrel_distortion_);
   }
 
 private:
   rcl_interfaces::msg::SetParametersResult on_parameters(
     const std::vector<rclcpp::Parameter> & parameters)
   {
+    bool geometry_changed = false;
     for (const auto & parameter : parameters) {
       const auto & name = parameter.get_name();
       if (name == "enabled") {
@@ -250,7 +254,46 @@ private:
         highlight_max_delta_from_frame_high_ = std::max(0.0, parameter.as_double());
       } else if (name == "passthrough_when_no_region") {
         passthrough_when_no_region_ = parameter.as_bool();
+      } else if (name == "depth_fov_horizontal") {
+        depth_hfov_deg_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "depth_fov_vertical") {
+        depth_vfov_deg_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "thermal_fov_horizontal") {
+        thermal_hfov_deg_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "thermal_fov_vertical") {
+        thermal_vfov_deg_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "thermal_offset_x") {
+        thermal_offset_x_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "thermal_offset_y") {
+        thermal_offset_y_ = parameter.as_double();
+        geometry_changed = true;
+      } else if (name == "thermal_scale") {
+        thermal_scale_ = std::max(0.1, parameter.as_double());
+        geometry_changed = true;
+      } else if (name == "thermal_barrel_distortion") {
+        thermal_barrel_distortion_ = std::clamp(parameter.as_double(), -1.0, 1.0);
+        geometry_changed = true;
+      } else if (name == "thermal_stretch_x") {
+        thermal_stretch_x_ = std::max(0.1, parameter.as_double());
+        geometry_changed = true;
+      } else if (name == "thermal_stretch_y") {
+        thermal_stretch_y_ = std::max(0.1, parameter.as_double());
+        geometry_changed = true;
+      } else if (name == "flip_thermal_x") {
+        flip_thermal_x_ = parameter.as_bool();
+        geometry_changed = true;
+      } else if (name == "flip_thermal_y") {
+        flip_thermal_y_ = parameter.as_bool();
+        geometry_changed = true;
       }
+    }
+    if (geometry_changed) {
+      thermal_to_depth_pixels_.clear();
     }
     rcl_interfaces::msg::SetParametersResult result;
     result.successful = true;
@@ -300,7 +343,19 @@ private:
     }
     CropRegion roi;
     if (have_crop_) {
-      roi = thermal_to_depth_roi(latest_crop_, static_cast<int>(image.width), static_cast<int>(image.height));
+      auto output = mask_depth_by_thermal_mask(image, roi);
+      if (roi.width <= 0 || roi.height <= 0) {
+        if (passthrough_when_no_region_) {
+          depth_pub_->publish(image);
+          if (have_camera_info_) {
+            auto info = latest_camera_info_;
+            info.header = image.header;
+            camera_info_pub_->publish(info);
+          }
+        }
+        return;
+      }
+      depth_pub_->publish(std::move(output));
     } else {
       if (passthrough_when_no_region_) {
         depth_pub_->publish(image);
@@ -313,12 +368,6 @@ private:
       return;
     }
 
-    roi.x = std::clamp(roi.x, 0, static_cast<int>(image.width) - 1);
-    roi.y = std::clamp(roi.y, 0, static_cast<int>(image.height) - 1);
-    roi.width = std::clamp(roi.width, 1, static_cast<int>(image.width) - roi.x);
-    roi.height = std::clamp(roi.height, 1, static_cast<int>(image.height) - roi.y);
-
-    depth_pub_->publish(mask_depth_by_thermal_mask(image));
     if (have_camera_info_) {
       auto info = mask_camera_info(latest_camera_info_, roi);
       info.header = image.header;
@@ -512,8 +561,10 @@ private:
   }
 
   sensor_msgs::msg::Image mask_depth_by_thermal_mask(
-    const sensor_msgs::msg::Image & image) const
+    const sensor_msgs::msg::Image & image,
+    CropRegion & roi)
   {
+    roi = {};
     const int bpp = bytes_per_pixel(image);
     const int depth_width = static_cast<int>(image.width);
     const int depth_height = static_cast<int>(image.height);
@@ -526,83 +577,118 @@ private:
     {
       return black_image_like(image);
     }
+    ensure_thermal_to_depth_lookup(depth_width, depth_height, thermal_width, thermal_height);
+
+    auto output = black_image_like(image);
+    int selected_left = depth_width;
+    int selected_top = depth_height;
+    int selected_right = -1;
+    int selected_bottom = -1;
+    for (int thermal_pixel = 0; thermal_pixel < thermal_width * thermal_height; ++thermal_pixel) {
+      if (!latest_thermal_mask_[static_cast<size_t>(thermal_pixel)]) {
+        continue;
+      }
+      for (const int depth_pixel : thermal_to_depth_pixels_[static_cast<size_t>(thermal_pixel)]) {
+        const int y = depth_pixel / depth_width;
+        const int x = depth_pixel % depth_width;
+        const auto offset =
+          static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
+        if (offset + static_cast<size_t>(bpp) <= output.data.size()) {
+          std::copy_n(
+            image.data.begin() + static_cast<long>(offset),
+            bpp,
+            output.data.begin() + static_cast<long>(offset));
+          selected_left = std::min(selected_left, x);
+          selected_top = std::min(selected_top, y);
+          selected_right = std::max(selected_right, x);
+          selected_bottom = std::max(selected_bottom, y);
+        }
+      }
+    }
+    if (selected_right >= selected_left && selected_bottom >= selected_top) {
+      roi = {
+        selected_left,
+        selected_top,
+        selected_right - selected_left + 1,
+        selected_bottom - selected_top + 1,
+        latest_crop_.cluster_size,
+        latest_crop_.highlighted_count};
+    }
+    return output;
+  }
+
+  void ensure_thermal_to_depth_lookup(
+    int depth_width,
+    int depth_height,
+    int thermal_width,
+    int thermal_height)
+  {
+    const auto thermal_pixels = static_cast<size_t>(thermal_width * thermal_height);
+    if (
+      cached_depth_width_ == depth_width && cached_depth_height_ == depth_height &&
+      cached_thermal_width_ == thermal_width && cached_thermal_height_ == thermal_height &&
+      thermal_to_depth_pixels_.size() == thermal_pixels)
+    {
+      return;
+    }
 
     const double depth_fraction_x = fov_fraction(thermal_hfov_deg_, depth_hfov_deg_) *
       thermal_scale_ * thermal_stretch_x_;
     const double depth_fraction_y = fov_fraction(thermal_vfov_deg_, depth_vfov_deg_) *
       thermal_scale_ * thermal_stretch_y_;
     const int window_width = std::max(
-      thermal_width, static_cast<int>(std::round(depth_width * depth_fraction_x)));
+      latest_thermal_width_, static_cast<int>(std::round(depth_width * depth_fraction_x)));
     const int window_height = std::max(
-      thermal_height, static_cast<int>(std::round(depth_height * depth_fraction_y)));
+      latest_thermal_height_, static_cast<int>(std::round(depth_height * depth_fraction_y)));
     const int window_left = static_cast<int>(
       std::round((depth_width - window_width) / 2.0 + thermal_offset_x_));
     const int window_top = static_cast<int>(
       std::round((depth_height - window_height) / 2.0 + thermal_offset_y_));
+    const double inverse_window_width = 1.0 / std::max(1, window_width);
+    const double inverse_window_height = 1.0 / std::max(1, window_height);
 
-    auto output = image;
+    thermal_to_depth_pixels_.assign(thermal_pixels, {});
+    const auto depth_pixel_count =
+      static_cast<size_t>(depth_width) * static_cast<size_t>(depth_height);
+    const auto average_depth_pixels =
+      (depth_pixel_count + thermal_pixels - 1) / thermal_pixels;
+    for (auto & depth_pixels : thermal_to_depth_pixels_) {
+      depth_pixels.reserve(average_depth_pixels);
+    }
     for (int y = 0; y < depth_height; ++y) {
-      const int display_y = static_cast<int>(std::floor(
-        (y - window_top) * thermal_height / static_cast<double>(window_height)));
+      const double destination_y = (y - window_top) * inverse_window_height;
       for (int x = 0; x < depth_width; ++x) {
-        const int display_x = static_cast<int>(std::floor(
-          (x - window_left) * thermal_width / static_cast<double>(window_width)));
-        bool selected = display_x >= 0 && display_x < thermal_width &&
-          display_y >= 0 && display_y < thermal_height;
-        if (selected) {
-          const int thermal_x = flip_thermal_x_ ? thermal_width - 1 - display_x : display_x;
-          const int thermal_y = flip_thermal_y_ ? thermal_height - 1 - display_y : display_y;
-          selected = latest_thermal_mask_[static_cast<size_t>(
-            thermal_y * thermal_width + thermal_x)] != 0;
+        const double destination_x = (x - window_left) * inverse_window_width;
+        double source_x = destination_x;
+        double source_y = destination_y;
+        if (thermal_barrel_distortion_ != 0.0) {
+          const double normalized_x = destination_x * 2.0 - 1.0;
+          const double normalized_y = destination_y * 2.0 - 1.0;
+          const double radius_squared =
+            (normalized_x * normalized_x + normalized_y * normalized_y) / 2.0;
+          const double radial_scale = 1.0 + thermal_barrel_distortion_ * radius_squared;
+          source_x = (normalized_x * radial_scale + 1.0) / 2.0;
+          source_y = (normalized_y * radial_scale + 1.0) / 2.0;
         }
-        if (selected) {
+        if (source_x < 0.0 || source_x >= 1.0 || source_y < 0.0 || source_y >= 1.0) {
           continue;
         }
-        const auto offset = static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
-        if (offset + static_cast<size_t>(bpp) <= output.data.size()) {
-          std::fill_n(output.data.begin() + static_cast<long>(offset), bpp, 0);
-        }
+
+        const int display_x = std::clamp(
+          static_cast<int>(std::floor(source_x * thermal_width)), 0, thermal_width - 1);
+        const int display_y = std::clamp(
+          static_cast<int>(std::floor(source_y * thermal_height)), 0, thermal_height - 1);
+        const int thermal_x = flip_thermal_x_ ? thermal_width - 1 - display_x : display_x;
+        const int thermal_y = flip_thermal_y_ ? thermal_height - 1 - display_y : display_y;
+        const int thermal_pixel = thermal_y * thermal_width + thermal_x;
+        thermal_to_depth_pixels_[static_cast<size_t>(thermal_pixel)].push_back(
+          y * depth_width + x);
       }
     }
-    return output;
-  }
-
-  CropRegion thermal_to_depth_roi(const CropRegion & thermal, int depth_width, int depth_height) const
-  {
-    const double depth_fraction_x = fov_fraction(thermal_hfov_deg_, depth_hfov_deg_) *
-      thermal_scale_ * thermal_stretch_x_;
-    const double depth_fraction_y = fov_fraction(thermal_vfov_deg_, depth_vfov_deg_) *
-      thermal_scale_ * thermal_stretch_y_;
-    const int thermal_window_width = std::max(
-      latest_thermal_width_, static_cast<int>(std::round(depth_width * depth_fraction_x)));
-    const int thermal_window_height = std::max(
-      latest_thermal_height_, static_cast<int>(std::round(depth_height * depth_fraction_y)));
-    const int thermal_window_left = static_cast<int>(
-      std::round((depth_width - thermal_window_width) / 2.0 + thermal_offset_x_));
-    const int thermal_window_top = static_cast<int>(
-      std::round((depth_height - thermal_window_height) / 2.0 + thermal_offset_y_));
-
-    const int display_x = flip_thermal_x_ ?
-      latest_thermal_width_ - thermal.x - thermal.width :
-      thermal.x;
-    const int display_y = flip_thermal_y_ ?
-      latest_thermal_height_ - thermal.y - thermal.height :
-      thermal.y;
-    return {
-      static_cast<int>(std::round(
-        thermal_window_left + display_x * thermal_window_width /
-        static_cast<double>(std::max(1, latest_thermal_width_)))),
-      static_cast<int>(std::round(
-        thermal_window_top + display_y * thermal_window_height /
-        static_cast<double>(std::max(1, latest_thermal_height_)))),
-      std::max(1, static_cast<int>(std::round(
-        thermal.width * thermal_window_width /
-        static_cast<double>(std::max(1, latest_thermal_width_))))),
-      std::max(1, static_cast<int>(std::round(
-        thermal.height * thermal_window_height /
-        static_cast<double>(std::max(1, latest_thermal_height_))))),
-      thermal.cluster_size,
-      thermal.highlighted_count};
+    cached_depth_width_ = depth_width;
+    cached_depth_height_ = depth_height;
+    cached_thermal_width_ = thermal_width;
+    cached_thermal_height_ = thermal_height;
   }
 
   double fov_fraction(double inner_degrees, double outer_degrees) const
@@ -635,6 +721,7 @@ private:
   double thermal_offset_x_ = 0.0;
   double thermal_offset_y_ = 0.0;
   double thermal_scale_ = 1.0;
+  double thermal_barrel_distortion_ = 0.0;
   double thermal_stretch_x_ = 0.8;
   double thermal_stretch_y_ = 0.9;
   bool flip_thermal_x_ = true;
@@ -647,6 +734,11 @@ private:
   bool have_crop_ = false;
   int latest_thermal_width_ = 32;
   int latest_thermal_height_ = 24;
+  int cached_depth_width_ = 0;
+  int cached_depth_height_ = 0;
+  int cached_thermal_width_ = 0;
+  int cached_thermal_height_ = 0;
+  std::vector<std::vector<int>> thermal_to_depth_pixels_;
   sensor_msgs::msg::CameraInfo latest_camera_info_;
   bool have_camera_info_ = false;
 

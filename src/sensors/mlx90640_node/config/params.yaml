@@ -31,6 +31,7 @@ thermal_cropper_node:
     thermal_offset_x: 0.0
     thermal_offset_y: 0.0
     thermal_scale: 1.0
+    thermal_barrel_distortion: 0.0
     thermal_stretch_x: 0.8
     thermal_stretch_y: 0.9
     flip_thermal_x: true

@@ -45,6 +45,7 @@ def generate_launch_description():
     thermal_offset_x = LaunchConfiguration('thermal_offset_x')
     thermal_offset_y = LaunchConfiguration('thermal_offset_y')
     thermal_scale = LaunchConfiguration('thermal_scale')
+    thermal_barrel_distortion = LaunchConfiguration('thermal_barrel_distortion')
     thermal_stretch_x = LaunchConfiguration('thermal_stretch_x')
     thermal_stretch_y = LaunchConfiguration('thermal_stretch_y')
     flip_thermal_x = LaunchConfiguration('flip_thermal_x')
@@ -167,6 +168,11 @@ def generate_launch_description():
             description='Uniform thermal-to-depth overlay scale.',
         ),
         DeclareLaunchArgument(
+            'thermal_barrel_distortion',
+            default_value='0.0',
+            description='Signed radial distortion used to align thermal and depth image edges.',
+        ),
+        DeclareLaunchArgument(
             'thermal_stretch_x',
             default_value='0.8',
             description='Horizontal thermal-to-depth overlay stretch.',
@@ -241,6 +247,8 @@ def generate_launch_description():
                 'thermal_offset_x': ParameterValue(thermal_offset_x, value_type=float),
                 'thermal_offset_y': ParameterValue(thermal_offset_y, value_type=float),
                 'thermal_scale': ParameterValue(thermal_scale, value_type=float),
+                'thermal_barrel_distortion': ParameterValue(
+                    thermal_barrel_distortion, value_type=float),
                 'thermal_stretch_x': ParameterValue(thermal_stretch_x, value_type=float),
                 'thermal_stretch_y': ParameterValue(thermal_stretch_y, value_type=float),
                 'flip_thermal_x': ParameterValue(flip_thermal_x, value_type=bool),
