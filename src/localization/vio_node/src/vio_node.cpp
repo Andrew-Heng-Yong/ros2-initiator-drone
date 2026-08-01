@@ -156,7 +156,8 @@ public:
       declare_parameter<double>("maximum_visual_translation_m", 2.0);
 
     gravity_mps2_ = declare_parameter<double>("gravity_mps2", 9.80665);
-    initialization_samples_ = declare_parameter<int>("initialization_samples", 200);
+    calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
+    initialization_samples_ = declare_parameter<int>("initialization_samples", 100);
     stationary_gyro_threshold_ =
       declare_parameter<double>("stationary_gyro_threshold_radps", 0.15);
     stationary_accel_tolerance_ =
@@ -205,10 +206,18 @@ public:
         start_full_calibration(response);
       });
 
-    RCLCPP_INFO(
-      get_logger(),
-      "VIO waiting for stationary IMU initialization (%d samples); image=%s imu=%s output=%s",
-      initialization_samples_, image_topic_.c_str(), imu_topic_.c_str(), odom_topic_.c_str());
+    if (calibrate_on_startup_) {
+      reset_estimator_for_calibration();
+      RCLCPP_INFO(
+        get_logger(),
+        "Automatic VIO calibration started (%d stationary samples); image=%s imu=%s output=%s",
+        initialization_samples_, image_topic_.c_str(), imu_topic_.c_str(), odom_topic_.c_str());
+    } else {
+      initialized_ = true;
+      RCLCPP_WARN(
+        get_logger(),
+        "VIO startup calibration is disabled; using zero biases and identity orientation");
+    }
   }
 
 private:
@@ -319,6 +328,17 @@ private:
   void start_full_calibration(
     const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
+    reset_estimator_for_calibration();
+    response->success = true;
+    response->message = "full VIO calibration started; keep the drone stationary";
+    RCLCPP_INFO(
+      get_logger(),
+      "Full VIO calibration started; resetting pose and collecting %d stationary samples",
+      initialization_samples_);
+  }
+
+  void reset_estimator_for_calibration()
+  {
     initialized_ = false;
     initialization_count_ = 0;
     gyro_sum_.setValue(0.0, 0.0, 0.0);
@@ -333,12 +353,6 @@ private:
     previous_image_orientation_ = tf2::Quaternion::getIdentity();
     previous_gray_.release();
     previous_points_.clear();
-    response->success = true;
-    response->message = "full VIO calibration started; keep the drone stationary";
-    RCLCPP_INFO(
-      get_logger(),
-      "Full VIO calibration started; resetting pose and collecting %d stationary samples",
-      initialization_samples_);
   }
 
   void collect_initialization_sample(
@@ -611,6 +625,7 @@ private:
   bool publish_tf_ = true;
   bool has_intrinsics_ = false;
   bool initialized_ = false;
+  bool calibrate_on_startup_ = true;
 
   double fx_ = 0.0;
   double fy_ = 0.0;
@@ -630,7 +645,7 @@ private:
   double maximum_visual_translation_m_ = 2.0;
 
   double gravity_mps2_ = 9.80665;
-  int initialization_samples_ = 200;
+  int initialization_samples_ = 100;
   int initialization_count_ = 0;
   double stationary_gyro_threshold_ = 0.15;
   double stationary_accel_tolerance_ = 1.5;

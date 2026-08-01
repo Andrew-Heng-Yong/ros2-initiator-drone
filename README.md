@@ -62,7 +62,7 @@ ros2 launch drone_control drone_launch.py start_imu:=true
 ```
 
 To start visual-inertial odometry, enable the camera and VIO. `start_vio:=true` enables the
-Orbbec RGB stream and MPU6050 by default. Keep the drone stationary for roughly two seconds
+Orbbec RGB stream and MPU6050 by default. Keep the drone stationary for roughly one second
 while it estimates gravity and sensor biases:
 
 ```bash

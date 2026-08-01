@@ -31,7 +31,8 @@ vio_node:
     maximum_visual_translation_m: 2.0
 
     gravity_mps2: 9.80665
-    initialization_samples: 200
+    calibrate_on_startup: true
+    initialization_samples: 100
     stationary_gyro_threshold_radps: 0.15
     stationary_accel_tolerance_mps2: 1.5
     max_imu_gap_sec: 0.1

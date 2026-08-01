@@ -4,7 +4,8 @@
 `nav_msgs/msg/Odometry` on `/vio/odometry`. It also broadcasts `odom -> base_link` unless
 `publish_tf` is disabled.
 
-The node waits for a stationary IMU initialization window and valid camera intrinsics. It
+With `calibrate_on_startup: true` (the default), the node automatically waits for a stationary
+IMU initialization window and valid camera intrinsics whenever it starts. It
 tracks Shi-Tomasi corners with pyramidal Lucas-Kanade optical flow, rejects outliers with an
 essential-matrix RANSAC, corrects the propagated attitude from visual rotation, and uses the
 IMU-propagated displacement to resolve the monocular translation scale.
