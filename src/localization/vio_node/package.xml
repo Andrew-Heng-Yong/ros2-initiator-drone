@@ -1,18 +1,24 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>drone_control</name>
+  <name>vio_node</name>
   <version>0.1.0</version>
-  <description>Top-level launch and orchestration package for the initiator drone.</description>
+  <description>Sparse monocular visual-inertial odometry for the initiator drone.</description>
   <maintainer email="user@example.com">Workspace maintainer</maintainer>
   <license>Apache-2.0</license>
+
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>cv_bridge</depend>
+  <depend>geometry_msgs</depend>
+  <depend>libopencv-dev</depend>
+  <depend>nav_msgs</depend>
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
-  <exec_depend>mi0802_senxor_driver</exec_depend>
-  <exec_depend>mlx90640_node</exec_depend>
-  <exec_depend>mpu6050_node</exec_depend>
-  <exec_depend>rosbridge_server</exec_depend>
-  <exec_depend>vio_node</exec_depend>
+
   <export><build_type>ament_cmake</build_type></export>
 </package>

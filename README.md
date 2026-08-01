@@ -1,11 +1,12 @@
 # ROS 2 initiator drone
 
-This workspace is split into a top-level control package and sensor packages:
+This workspace is split into top-level control, localization, and sensor packages:
 
 - `src/drone_control`: main drone launch/orchestration package.
 - `src/sensors/mi0802_senxor_driver`: C++ ROS 2 driver for a Meridian Innovation MI0802 SenXor over USB CDC ACM.
 - `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
 - `src/sensors/mpu6050_node`: C++ ROS 2 driver for an MPU6050 accelerometer/gyroscope over Linux I2C.
+- `src/localization/vio_node`: sparse monocular visual-inertial odometry publishing `/vio/odometry` and `odom -> base_link`.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
@@ -59,6 +60,21 @@ To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defa
 ```bash
 ros2 launch drone_control drone_launch.py start_imu:=true
 ```
+
+To start visual-inertial odometry, enable the camera and VIO. `start_vio:=true` enables the
+Orbbec RGB stream and MPU6050 by default. Keep the drone stationary for roughly two seconds
+while it estimates gravity and sensor biases:
+
+```bash
+ros2 launch drone_control drone_launch.py \
+  start_depth_camera:=true start_vio:=true
+ros2 topic echo /vio/odometry
+```
+
+The VIO defaults consume `/camera/color/image_raw`, `/camera/color/camera_info`, and
+`/imu/data_raw`. Mount rotations, feature tracking, fusion weights, and covariance values are
+configured in `src/localization/vio_node/config/params.yaml`. Replace the default mount
+rotations with measured values before flight. See the package README for estimator limitations.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:

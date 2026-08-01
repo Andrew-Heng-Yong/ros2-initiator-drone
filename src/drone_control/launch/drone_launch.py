@@ -22,9 +22,13 @@ def generate_launch_description():
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     mpu6050_share = get_package_share_directory('mpu6050_node')
     mpu6050_params = os.path.join(mpu6050_share, 'config', 'params.yaml')
+    vio_share = get_package_share_directory('vio_node')
+    vio_params = os.path.join(vio_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
     start_imu = LaunchConfiguration('start_imu')
+    start_vio = LaunchConfiguration('start_vio')
+    enable_color_camera = LaunchConfiguration('enable_color_camera')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_device = LaunchConfiguration('thermal_device')
@@ -63,9 +67,19 @@ def generate_launch_description():
             description='Start the Orbbec depth camera driver.',
         ),
         DeclareLaunchArgument(
-            'start_imu',
+            'start_vio',
             default_value='false',
-            description='Start the MPU6050 IMU driver.',
+            description='Start VIO and enable its IMU/RGB inputs by default.',
+        ),
+        DeclareLaunchArgument(
+            'start_imu',
+            default_value=start_vio,
+            description='Start the MPU6050 IMU driver (defaults to start_vio).',
+        ),
+        DeclareLaunchArgument(
+            'enable_color_camera',
+            default_value=start_vio,
+            description='Enable Orbbec RGB on /camera/color/image_raw (defaults to start_vio).',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',
@@ -195,7 +209,7 @@ def generate_launch_description():
         ExecuteProcess(
             cmd=[
                 'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
-                'enable_color:=false',
+                ['enable_color:=', enable_color_camera],
                 'enable_depth:=true',
                 'depth_width:=640',
                 'depth_height:=480',
@@ -279,6 +293,14 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(start_imu),
             parameters=[mpu6050_params],
+        ),
+        Node(
+            package='vio_node',
+            executable='vio_node',
+            name='vio_node',
+            output='screen',
+            condition=IfCondition(start_vio),
+            parameters=[vio_params],
         ),
         Node(
             package='rosbridge_server',

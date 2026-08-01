@@ -76,7 +76,9 @@ lsusb | grep -i "2bc5\|orbbec"
 
 ## Manual Camera Launch Test
 
-The drone launch file starts depth at 640x480 5 fps without launching RGB.
+The drone launch file starts depth at 640x480 5 fps without launching RGB by default. Pass
+`enable_color_camera:=true` when the RGB stream is needed. `start_vio:=true` enables it
+automatically unless explicitly overridden.
 Test the same settings manually:
 
 ```bash
@@ -97,6 +99,17 @@ Verify topics:
 ros2 topic list | grep -E "camera|depth|image|camera_info"
 ros2 topic hz /camera/depth/image_raw
 ros2 topic echo /camera/depth/camera_info --once
+```
+
+For a VIO camera test, enable the color stream using the launch file's supported default color
+profile, then verify both color topics before starting the estimator:
+
+```bash
+ros2 launch orbbec_camera gemini_e.launch.py \
+  enable_color:=true enable_depth:=true depth_width:=640 depth_height:=480 depth_fps:=5 \
+  enable_ir:=false
+ros2 topic hz /camera/color/image_raw
+ros2 topic echo /camera/color/camera_info --once
 ```
 
 ## Dashboard Depth Overlay
