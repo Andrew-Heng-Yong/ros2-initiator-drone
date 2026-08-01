@@ -8,8 +8,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -54,6 +55,117 @@ def generate_launch_description():
     thermal_stretch_y = LaunchConfiguration('thermal_stretch_y')
     flip_thermal_x = LaunchConfiguration('flip_thermal_x')
     flip_thermal_y = LaunchConfiguration('flip_thermal_y')
+
+    depth_camera_process = ExecuteProcess(
+        cmd=[
+            'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
+            ['enable_color:=', enable_color_camera],
+            'enable_depth:=true',
+            'depth_width:=640',
+            'depth_height:=480',
+            'depth_fps:=5',
+            'enable_ir:=false',
+        ],
+        output='screen',
+        condition=IfCondition(start_depth_camera),
+    )
+    thermal_driver_process = ExecuteProcess(
+        cmd=[
+            'bash', '-lc',
+            [
+                'for attempt in $(seq 1 30); do '
+                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 && break; '
+                'echo "Waiting for depth topic /camera/depth/image_raw..."; '
+                'sleep 1; '
+                'done; '
+                'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 || '
+                '(echo "Timed out waiting for depth topic /camera/depth/image_raw"; exit 1); '
+                f'exec ros2 run mi0802_senxor_driver mi0802_senxor_node --ros-args '
+                f'--params-file "{mi0802_params}" -p device:=',
+                thermal_device,
+            ],
+        ],
+        output='screen',
+        condition=IfCondition(start_depth_camera),
+    )
+    thermal_cropper_node = Node(
+        package='mlx90640_node',
+        executable='thermal_cropper_node',
+        name='thermal_cropper_node',
+        output='screen',
+        condition=IfCondition(start_thermal_cropper),
+        parameters=[mlx90640_params, {
+            'enabled': ParameterValue(thermal_cropper_enabled, value_type=bool),
+            'passthrough_when_no_region': ParameterValue(passthrough_when_no_region, value_type=bool),
+            'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
+            'min_region_size': ParameterValue(min_region_size, value_type=int),
+            'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),
+            'highlight_min_temp': ParameterValue(highlight_min_temp, value_type=float),
+            'highlight_max_temp': ParameterValue(highlight_max_temp, value_type=float),
+            'highlight_min_delta_from_frame_low': ParameterValue(highlight_min_delta_from_frame_low, value_type=float),
+            'highlight_max_delta_from_frame_high': ParameterValue(highlight_max_delta_from_frame_high, value_type=float),
+            'depth_fov_horizontal': ParameterValue(depth_fov_horizontal, value_type=float),
+            'depth_fov_vertical': ParameterValue(depth_fov_vertical, value_type=float),
+            'thermal_fov_horizontal': ParameterValue(thermal_fov_horizontal, value_type=float),
+            'thermal_fov_vertical': ParameterValue(thermal_fov_vertical, value_type=float),
+            'thermal_offset_x': ParameterValue(thermal_offset_x, value_type=float),
+            'thermal_offset_y': ParameterValue(thermal_offset_y, value_type=float),
+            'thermal_scale': ParameterValue(thermal_scale, value_type=float),
+            'thermal_barrel_distortion': ParameterValue(
+                thermal_barrel_distortion, value_type=float),
+            'thermal_stretch_x': ParameterValue(thermal_stretch_x, value_type=float),
+            'thermal_stretch_y': ParameterValue(thermal_stretch_y, value_type=float),
+            'flip_thermal_x': ParameterValue(flip_thermal_x, value_type=bool),
+            'flip_thermal_y': ParameterValue(flip_thermal_y, value_type=bool),
+        }],
+    )
+    thermal_overlay_node = Node(
+        package='mlx90640_node',
+        executable='thermal_overlay_node',
+        name='thermal_overlay_node',
+        output='screen',
+        condition=IfCondition(start_thermal_overlay),
+        parameters=[{
+            'alpha': ParameterValue(overlay_alpha, value_type=float),
+            'camera_topic': '/camera/depth/image_raw',
+            'thermal_topic': '/thermal/image_raw',
+            'output_topic': '/camera/thermal_overlay/image_raw',
+            'camera_hfov_deg': 67.0,
+            'camera_vfov_deg': 53.6,
+            'thermal_hfov_deg': 55.0,
+            'thermal_vfov_deg': 35.0,
+        }],
+    )
+    calibration_gate = ExecuteProcess(
+        cmd=[
+            'bash', '-lc',
+            [
+                'case "', start_vio, '" in true|True|1) ;; *) exit 0 ;; esac; '
+                'echo "Waiting for VIO calibration before starting camera and thermal nodes..."; '
+                'while true; do '
+                'status=$(timeout 2s ros2 topic echo /vio/calibrated std_msgs/msg/Bool '
+                '--once --qos-durability transient_local 2>/dev/null || true); '
+                'if echo "$status" | grep -q "data: true"; then '
+                'echo "VIO calibration complete; starting camera and thermal nodes."; '
+                'exit 0; '
+                'fi; '
+                'sleep 0.1; '
+                'done'
+            ],
+        ],
+        output='screen',
+    )
+    delayed_sensor_handler = RegisterEventHandler(
+        OnProcessExit(
+            target_action=calibration_gate,
+            on_exit=[
+                depth_camera_process,
+                thermal_driver_process,
+                thermal_cropper_node,
+                thermal_overlay_node,
+            ],
+        )
+    )
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -206,86 +318,8 @@ def generate_launch_description():
             default_value='false',
             description='Flip thermal coordinates vertically.',
         ),
-        ExecuteProcess(
-            cmd=[
-                'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
-                ['enable_color:=', enable_color_camera],
-                'enable_depth:=true',
-                'depth_width:=640',
-                'depth_height:=480',
-                'depth_fps:=5',
-                'enable_ir:=false',
-            ],
-            output='screen',
-            condition=IfCondition(start_depth_camera),
-        ),
-        ExecuteProcess(
-            cmd=[
-                'bash', '-lc',
-                [
-                    'for attempt in $(seq 1 30); do '
-                    'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 && break; '
-                    'echo "Waiting for depth topic /camera/depth/image_raw..."; '
-                    'sleep 1; '
-                    'done; '
-                    'ros2 topic info /camera/depth/image_raw > /dev/null 2>&1 || '
-                    '(echo "Timed out waiting for depth topic /camera/depth/image_raw"; exit 1); '
-                    f'exec ros2 run mi0802_senxor_driver mi0802_senxor_node --ros-args '
-                    f'--params-file "{mi0802_params}" -p device:=',
-                    thermal_device,
-                ],
-            ],
-            output='screen',
-            condition=IfCondition(start_depth_camera),
-        ),
-        Node(
-            package='mlx90640_node',
-            executable='thermal_cropper_node',
-            name='thermal_cropper_node',
-            output='screen',
-            condition=IfCondition(start_thermal_cropper),
-            parameters=[mlx90640_params, {
-                'enabled': ParameterValue(thermal_cropper_enabled, value_type=bool),
-                'passthrough_when_no_region': ParameterValue(passthrough_when_no_region, value_type=bool),
-                'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
-                'min_region_size': ParameterValue(min_region_size, value_type=int),
-                'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),
-                'highlight_min_temp': ParameterValue(highlight_min_temp, value_type=float),
-                'highlight_max_temp': ParameterValue(highlight_max_temp, value_type=float),
-                'highlight_min_delta_from_frame_low': ParameterValue(highlight_min_delta_from_frame_low, value_type=float),
-                'highlight_max_delta_from_frame_high': ParameterValue(highlight_max_delta_from_frame_high, value_type=float),
-                'depth_fov_horizontal': ParameterValue(depth_fov_horizontal, value_type=float),
-                'depth_fov_vertical': ParameterValue(depth_fov_vertical, value_type=float),
-                'thermal_fov_horizontal': ParameterValue(thermal_fov_horizontal, value_type=float),
-                'thermal_fov_vertical': ParameterValue(thermal_fov_vertical, value_type=float),
-                'thermal_offset_x': ParameterValue(thermal_offset_x, value_type=float),
-                'thermal_offset_y': ParameterValue(thermal_offset_y, value_type=float),
-                'thermal_scale': ParameterValue(thermal_scale, value_type=float),
-                'thermal_barrel_distortion': ParameterValue(
-                    thermal_barrel_distortion, value_type=float),
-                'thermal_stretch_x': ParameterValue(thermal_stretch_x, value_type=float),
-                'thermal_stretch_y': ParameterValue(thermal_stretch_y, value_type=float),
-                'flip_thermal_x': ParameterValue(flip_thermal_x, value_type=bool),
-                'flip_thermal_y': ParameterValue(flip_thermal_y, value_type=bool),
-            }],
-        ),
-        Node(
-            package='mlx90640_node',
-            executable='thermal_overlay_node',
-            name='thermal_overlay_node',
-            output='screen',
-            condition=IfCondition(start_thermal_overlay),
-            parameters=[{
-                'alpha': ParameterValue(overlay_alpha, value_type=float),
-                'camera_topic': '/camera/depth/image_raw',
-                'thermal_topic': '/thermal/image_raw',
-                'output_topic': '/camera/thermal_overlay/image_raw',
-                'camera_hfov_deg': 67.0,
-                'camera_vfov_deg': 53.6,
-                'thermal_hfov_deg': 55.0,
-                'thermal_vfov_deg': 35.0,
-            }],
-        ),
+        delayed_sensor_handler,
+        calibration_gate,
         Node(
             package='mpu6050_node',
             executable='mpu6050_node',

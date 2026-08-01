@@ -22,6 +22,7 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
@@ -128,6 +129,8 @@ public:
     camera_info_topic_ =
       declare_parameter<std::string>("camera_info_topic", "/camera/color/camera_info");
     imu_topic_ = declare_parameter<std::string>("imu_topic", "/imu/data_raw");
+    calibrated_imu_topic_ =
+      declare_parameter<std::string>("calibrated_imu_topic", "/imu/data_calibrated");
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/vio/odometry");
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
@@ -179,6 +182,10 @@ public:
     validate_parameters();
 
     odometry_publisher_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
+    calibrated_imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(
+      calibrated_imu_topic_, rclcpp::SensorDataQoS());
+    calibration_status_publisher_ = create_publisher<std_msgs::msg::Bool>(
+      "/vio/calibrated", rclcpp::QoS(1).reliable().transient_local());
     if (publish_tf_) {
       transform_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -212,6 +219,7 @@ public:
         initialization_samples_, image_topic_.c_str(), imu_topic_.c_str(), odom_topic_.c_str());
     } else {
       initialized_ = true;
+      publish_calibration_status(true);
       RCLCPP_WARN(
         get_logger(),
         "VIO startup calibration is disabled; using zero biases and identity orientation");
@@ -221,7 +229,8 @@ public:
 private:
   void validate_parameters() const
   {
-    if (image_topic_.empty() || imu_topic_.empty() || odom_topic_.empty() ||
+    if (image_topic_.empty() || imu_topic_.empty() || calibrated_imu_topic_.empty() ||
+      odom_topic_.empty() ||
       odom_frame_.empty() || base_frame_.empty())
     {
       throw std::invalid_argument("topic and frame parameters must not be empty");
@@ -322,6 +331,7 @@ private:
     velocity_ += acceleration_world * dt;
     angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
+    publish_calibrated_imu(stamp, angular_velocity, acceleration_body);
     publish_odometry(stamp);
   }
 
@@ -354,6 +364,7 @@ private:
     previous_image_orientation_ = tf2::Quaternion::getIdentity();
     previous_gray_.release();
     previous_points_.clear();
+    publish_calibration_status(false);
   }
 
   void collect_initialization_sample(
@@ -388,6 +399,7 @@ private:
       orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
     last_imu_stamp_ = rclcpp::Time(stamp_message);
     initialized_ = true;
+    publish_calibration_status(true);
     RCLCPP_INFO(
       get_logger(),
       "VIO initialized after %d samples: gyro bias [%.5f %.5f %.5f], "
@@ -396,7 +408,42 @@ private:
       gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(),
       accel_scale_correction_,
       accel_bias_.x(), accel_bias_.y(), accel_bias_.z());
+    publish_calibrated_imu(
+      last_imu_stamp_, gyro - gyro_bias_,
+      acceleration * accel_scale_correction_ - accel_bias_);
     publish_odometry(last_imu_stamp_);
+  }
+
+  void publish_calibration_status(bool calibrated)
+  {
+    std_msgs::msg::Bool message;
+    message.data = calibrated;
+    calibration_status_publisher_->publish(message);
+  }
+
+  void publish_calibrated_imu(
+    const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity,
+    const tf2::Vector3 & acceleration_with_gravity)
+  {
+    const tf2::Vector3 gravity_body = tf2::quatRotate(
+      orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
+
+    sensor_msgs::msg::Imu message;
+    message.header.stamp = stamp;
+    message.header.frame_id = base_frame_;
+    message.orientation = quaternion_message(orientation_);
+    message.angular_velocity = vector_message(angular_velocity);
+    message.linear_acceleration = vector_message(acceleration_with_gravity - gravity_body);
+    message.orientation_covariance[0] = orientation_variance_;
+    message.orientation_covariance[4] = orientation_variance_;
+    message.orientation_covariance[8] = orientation_variance_;
+    message.angular_velocity_covariance[0] = angular_velocity_variance_;
+    message.angular_velocity_covariance[4] = angular_velocity_variance_;
+    message.angular_velocity_covariance[8] = angular_velocity_variance_;
+    message.linear_acceleration_covariance[0] = linear_velocity_variance_;
+    message.linear_acceleration_covariance[4] = linear_velocity_variance_;
+    message.linear_acceleration_covariance[8] = linear_velocity_variance_;
+    calibrated_imu_publisher_->publish(message);
   }
 
   void on_image(const sensor_msgs::msg::Image::ConstSharedPtr & message)
@@ -640,6 +687,7 @@ private:
   std::string image_topic_;
   std::string camera_info_topic_;
   std::string imu_topic_;
+  std::string calibrated_imu_topic_;
   std::string odom_topic_;
   std::string odom_frame_;
   std::string base_frame_;
@@ -696,6 +744,8 @@ private:
   std::vector<cv::Point2f> previous_points_;
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr calibrated_imu_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;

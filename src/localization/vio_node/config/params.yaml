@@ -3,6 +3,7 @@ vio_node:
     image_topic: /camera/color/image_raw
     camera_info_topic: /camera/color/camera_info
     imu_topic: /imu/data_raw
+    calibrated_imu_topic: /imu/data_calibrated
     odom_topic: /vio/odometry
 
     odom_frame: odom
