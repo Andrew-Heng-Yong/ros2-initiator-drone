@@ -32,7 +32,7 @@ vio_node:
 
     gravity_mps2: 9.80665
     calibrate_on_startup: true
-    initialization_samples: 100
+    initialization_samples: 20
     stationary_gyro_threshold_radps: 0.15
     stationary_accel_tolerance_mps2: 1.5
     max_imu_gap_sec: 0.1

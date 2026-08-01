@@ -157,7 +157,7 @@ public:
 
     gravity_mps2_ = declare_parameter<double>("gravity_mps2", 9.80665);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
-    initialization_samples_ = declare_parameter<int>("initialization_samples", 100);
+    initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
     stationary_gyro_threshold_ =
       declare_parameter<double>("stationary_gyro_threshold_radps", 0.15);
     stationary_accel_tolerance_ =
@@ -645,7 +645,7 @@ private:
   double maximum_visual_translation_m_ = 2.0;
 
   double gravity_mps2_ = 9.80665;
-  int initialization_samples_ = 100;
+  int initialization_samples_ = 20;
   int initialization_count_ = 0;
   double stationary_gyro_threshold_ = 0.15;
   double stationary_accel_tolerance_ = 1.5;
