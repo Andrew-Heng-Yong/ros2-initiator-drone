@@ -146,6 +146,8 @@ public:
     ransac_probability_ = declare_parameter<double>("ransac_probability", 0.999);
     ransac_threshold_pixels_ = declare_parameter<double>("ransac_threshold_pixels", 1.5);
     max_visual_rotation_rad_ = declare_parameter<double>("max_visual_rotation_rad", 0.7);
+    visual_processing_rate_hz_ = declare_parameter<double>("visual_processing_rate_hz", 5.0);
+    image_processing_scale_ = declare_parameter<double>("image_processing_scale", 0.5);
     visual_orientation_weight_ =
       clamp01(declare_parameter<double>("visual_orientation_weight", 0.20));
     visual_translation_weight_ =
@@ -158,8 +160,8 @@ public:
     gravity_mps2_ = declare_parameter<double>("gravity_mps2", 9.80665);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
-    max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.1);
-    max_image_gap_sec_ = declare_parameter<double>("max_image_gap_sec", 0.5);
+    max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
+    max_image_gap_sec_ = declare_parameter<double>("max_image_gap_sec", 1.0);
 
     camera_to_body_ = quaternion_from_rpy(
       declare_parameter<std::vector<double>>(
@@ -231,7 +233,9 @@ private:
       throw std::invalid_argument("invalid feature tracking parameters");
     }
     if (ransac_probability_ <= 0.0 || ransac_probability_ >= 1.0 ||
-      ransac_threshold_pixels_ <= 0.0 || max_visual_rotation_rad_ <= 0.0)
+      ransac_threshold_pixels_ <= 0.0 || max_visual_rotation_rad_ <= 0.0 ||
+      visual_processing_rate_hz_ <= 0.0 || image_processing_scale_ < 0.1 ||
+      image_processing_scale_ > 1.0)
     {
       throw std::invalid_argument("invalid visual motion parameters");
     }
@@ -408,6 +412,14 @@ private:
       return;
     }
 
+    const rclcpp::Time stamp(message->header.stamp);
+    if (!previous_gray_.empty()) {
+      const double elapsed = (stamp - previous_image_stamp_).seconds();
+      if (elapsed > 0.0 && elapsed < 1.0 / visual_processing_rate_hz_) {
+        return;
+      }
+    }
+
     cv::Mat gray;
     try {
       gray = grayscale_image(message);
@@ -419,8 +431,14 @@ private:
     if (gray.empty()) {
       return;
     }
+    if (image_processing_scale_ < 0.999) {
+      cv::Mat scaled;
+      cv::resize(
+        gray, scaled, cv::Size(), image_processing_scale_, image_processing_scale_,
+        cv::INTER_AREA);
+      gray = std::move(scaled);
+    }
 
-    const rclcpp::Time stamp(message->header.stamp);
     if (previous_gray_.empty()) {
       reset_visual_reference(gray, stamp);
       return;
@@ -495,8 +513,12 @@ private:
     const std::vector<cv::Point2f> & current_points,
     double dt)
   {
+    const double scaled_fx = fx_ * image_processing_scale_;
+    const double scaled_fy = fy_ * image_processing_scale_;
+    const double scaled_cx = cx_ * image_processing_scale_;
+    const double scaled_cy = cy_ * image_processing_scale_;
     const cv::Mat camera_matrix = (cv::Mat_<double>(3, 3) <<
-      fx_, 0.0, cx_, 0.0, fy_, cy_, 0.0, 0.0, 1.0);
+      scaled_fx, 0.0, scaled_cx, 0.0, scaled_fy, scaled_cy, 0.0, 0.0, 1.0);
     const cv::Mat distortion = distortion_coefficients_.empty() ?
       cv::Mat() : cv::Mat(distortion_coefficients_).clone();
     std::vector<cv::Point2f> normalized_previous;
@@ -507,7 +529,8 @@ private:
       current_points, normalized_current, camera_matrix, distortion);
     const cv::Mat normalized_camera_matrix = cv::Mat::eye(3, 3, CV_64F);
     const double normalized_ransac_threshold =
-      ransac_threshold_pixels_ / std::max(1.0, 0.5 * (fx_ + fy_));
+      (ransac_threshold_pixels_ * image_processing_scale_) /
+      std::max(1.0, 0.5 * (scaled_fx + scaled_fy));
     cv::Mat inlier_mask;
     const cv::Mat essential = cv::findEssentialMat(
       normalized_previous, normalized_current, normalized_camera_matrix, cv::RANSAC,
@@ -637,6 +660,8 @@ private:
   double ransac_probability_ = 0.999;
   double ransac_threshold_pixels_ = 1.5;
   double max_visual_rotation_rad_ = 0.7;
+  double visual_processing_rate_hz_ = 5.0;
+  double image_processing_scale_ = 0.5;
   double visual_orientation_weight_ = 0.20;
   double visual_translation_weight_ = 0.25;
   double visual_velocity_weight_ = 0.10;
@@ -646,8 +671,8 @@ private:
   double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
   int initialization_count_ = 0;
-  double max_imu_gap_sec_ = 0.1;
-  double max_image_gap_sec_ = 0.5;
+  double max_imu_gap_sec_ = 0.25;
+  double max_image_gap_sec_ = 1.0;
   double position_variance_ = 0.05;
   double orientation_variance_ = 0.02;
   double linear_velocity_variance_ = 0.10;

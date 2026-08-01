@@ -23,6 +23,8 @@ vio_node:
     ransac_probability: 0.999
     ransac_threshold_pixels: 1.5
     max_visual_rotation_rad: 0.7
+    visual_processing_rate_hz: 5.0
+    image_processing_scale: 0.5
 
     # The IMU supplies metric scale; visual measurements correct drift.
     visual_orientation_weight: 0.20
@@ -33,8 +35,8 @@ vio_node:
     gravity_mps2: 9.80665
     calibrate_on_startup: true
     initialization_samples: 20
-    max_imu_gap_sec: 0.1
-    max_image_gap_sec: 0.5
+    max_imu_gap_sec: 0.25
+    max_image_gap_sec: 1.0
 
     # Rotations map sensor-frame vectors into base_link. The camera default is
     # the standard ROS optical frame (x right, y down, z forward) to base frame

@@ -10,6 +10,10 @@ tracks Shi-Tomasi corners with pyramidal Lucas-Kanade optical flow, rejects outl
 essential-matrix RANSAC, corrects the propagated attitude from visual rotation, and uses the
 IMU-propagated displacement to resolve the monocular translation scale.
 
+On the Raspberry Pi, visual tracking is limited to `visual_processing_rate_hz` and images are
+resized by `image_processing_scale`. The defaults process the 30 FPS color stream at 5 FPS and
+half resolution so optical flow does not starve 100 Hz IMU propagation.
+
 Build and run it directly:
 
 ```bash
