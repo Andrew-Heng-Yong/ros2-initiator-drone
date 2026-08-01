@@ -73,9 +73,10 @@ ros2 topic echo /vio/odometry
 
 The VIO defaults consume `/camera/color/image_raw`, `/camera/color/camera_info`, and
 `/imu/data_raw`. It latches completion on `/vio/calibrated` and publishes bias-corrected gyro
-values plus acceleration zero-referenced to the stationary startup pose on
-`/imu/data_calibrated`. Those values are approximately zero while the drone remains stationary
-in that pose. Mount rotations, feature tracking, fusion weights, and covariance values are
+values plus current-attitude gravity-compensated acceleration on `/imu/data_calibrated`.
+Stationary values are approximately zero at any orientation. `/vio/visual_tracking` reports
+whether the most recently processed camera frame produced an accepted visual update. Mount
+rotations, feature tracking, fusion weights, and covariance values are
 configured in `src/localization/vio_node/config/params.yaml`. Replace the default mount
 rotations with measured values before flight. See the package README for estimator limitations.
 

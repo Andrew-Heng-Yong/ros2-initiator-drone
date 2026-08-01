@@ -173,6 +173,10 @@ public:
       declare_parameter<double>("calibrated_gyro_deadband_rad_s", 0.02);
     calibrated_accel_deadband_mps2_ =
       declare_parameter<double>("calibrated_accel_deadband_mps2", 0.20);
+    accelerometer_tilt_correction_weight_ = clamp01(
+      declare_parameter<double>("accelerometer_tilt_correction_weight", 0.02));
+    accelerometer_gravity_tolerance_mps2_ =
+      declare_parameter<double>("accelerometer_gravity_tolerance_mps2", 1.5);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
     startup_initialization_samples_ =
@@ -200,6 +204,8 @@ public:
       calibrated_imu_topic_, rclcpp::SensorDataQoS());
     calibration_status_publisher_ = create_publisher<std_msgs::msg::Bool>(
       "/vio/calibrated", rclcpp::QoS(1).reliable().transient_local());
+    visual_tracking_publisher_ = create_publisher<std_msgs::msg::Bool>(
+      "/vio/visual_tracking", rclcpp::QoS(1).reliable().transient_local());
     if (publish_tf_) {
       transform_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -235,6 +241,7 @@ public:
     } else {
       initialized_ = true;
       publish_calibration_status(true);
+      publish_visual_tracking(false);
       RCLCPP_WARN(
         get_logger(),
         "VIO startup calibration is disabled; using zero biases and identity orientation");
@@ -266,6 +273,7 @@ private:
     if (gravity_mps2_ <= 0.0 || calibrated_gyro_deadband_rad_s_ < 0.0 ||
       calibrated_accel_deadband_mps2_ < 0.0 || initialization_samples_ < 10 ||
       startup_initialization_samples_ < 10 ||
+      accelerometer_gravity_tolerance_mps2_ <= 0.0 ||
       max_imu_gap_sec_ <= 0.0 || max_image_gap_sec_ <= 0.0 ||
       maximum_visual_translation_m_ <= 0.0)
     {
@@ -333,11 +341,24 @@ private:
     }
 
     const tf2::Vector3 angular_velocity = raw_gyro - gyro_bias_;
-    const tf2::Vector3 acceleration_body =
-      raw_acceleration * accel_scale_correction_ - accel_bias_;
+    const tf2::Vector3 acceleration_body = raw_acceleration * accel_scale_correction_;
     const tf2::Quaternion old_orientation = orientation_;
     orientation_ = orientation_ * delta_quaternion(angular_velocity, dt);
     orientation_.normalize();
+
+    const double acceleration_magnitude = acceleration_body.length();
+    if (std::abs(acceleration_magnitude - gravity_mps2_) <=
+      accelerometer_gravity_tolerance_mps2_)
+    {
+      const tf2::Vector3 measured_gravity_world =
+        tf2::quatRotate(orientation_, acceleration_body);
+      const tf2::Quaternion full_tilt_correction = shortest_arc(
+        measured_gravity_world, tf2::Vector3(0.0, 0.0, gravity_mps2_));
+      const tf2::Quaternion tilt_correction = tf2::Quaternion::getIdentity().slerp(
+        full_tilt_correction, accelerometer_tilt_correction_weight_);
+      orientation_ = tilt_correction * orientation_;
+      orientation_.normalize();
+    }
 
     tf2::Quaternion midpoint_orientation = old_orientation.slerp(orientation_, 0.5);
     midpoint_orientation.normalize();
@@ -349,8 +370,7 @@ private:
     angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
     publish_calibrated_imu(
-      stamp, angular_velocity,
-      raw_acceleration * accel_scale_correction_ - stationary_acceleration_body_);
+      stamp, angular_velocity, remove_gravity(acceleration_body));
     publish_odometry(stamp);
   }
 
@@ -374,8 +394,6 @@ private:
     gyro_sum_.setValue(0.0, 0.0, 0.0);
     acceleration_sum_.setValue(0.0, 0.0, 0.0);
     gyro_bias_.setValue(0.0, 0.0, 0.0);
-    accel_bias_.setValue(0.0, 0.0, 0.0);
-    stationary_acceleration_body_.setValue(0.0, 0.0, 0.0);
     accel_scale_correction_ = 1.0;
     position_.setValue(0.0, 0.0, 0.0);
     velocity_.setValue(0.0, 0.0, 0.0);
@@ -385,7 +403,9 @@ private:
     previous_image_orientation_ = tf2::Quaternion::getIdentity();
     previous_gray_.release();
     previous_points_.clear();
+    accepted_visual_updates_ = 0;
     publish_calibration_status(false);
+    publish_visual_tracking(false);
   }
 
   void collect_initialization_sample(
@@ -411,29 +431,39 @@ private:
       return;
     }
     accel_scale_correction_ = gravity_mps2_ / measured_gravity;
+    if (accel_scale_correction_ < 0.5 || accel_scale_correction_ > 2.0) {
+      RCLCPP_ERROR(
+        get_logger(),
+        "Accelerometer scale correction %.3f is outside the expected 0.5-2.0 range; "
+        "check the MPU identity and range-readback log",
+        accel_scale_correction_);
+    }
     const tf2::Vector3 scaled_mean_acceleration =
       mean_acceleration * accel_scale_correction_;
-    stationary_acceleration_body_ = scaled_mean_acceleration;
     orientation_ = shortest_arc(
       scaled_mean_acceleration, tf2::Vector3(0.0, 0.0, gravity_mps2_));
     orientation_.normalize();
-    accel_bias_ = scaled_mean_acceleration - tf2::quatRotate(
-      orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
     last_imu_stamp_ = rclcpp::Time(stamp_message);
     initialized_ = true;
     publish_calibration_status(true);
     RCLCPP_INFO(
       get_logger(),
       "VIO initialized after %d samples: gyro bias [%.5f %.5f %.5f], "
-      "accel scale %.5f, accel bias [%.5f %.5f %.5f]",
+      "raw gravity %.5f m/s^2, accel scale %.5f",
       initialization_count_,
       gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(),
-      accel_scale_correction_,
-      accel_bias_.x(), accel_bias_.y(), accel_bias_.z());
+      measured_gravity, accel_scale_correction_);
     publish_calibrated_imu(
       last_imu_stamp_, gyro - gyro_bias_,
-      acceleration * accel_scale_correction_ - stationary_acceleration_body_);
+      remove_gravity(acceleration * accel_scale_correction_));
     publish_odometry(last_imu_stamp_);
+  }
+
+  tf2::Vector3 remove_gravity(const tf2::Vector3 & acceleration_body) const
+  {
+    const tf2::Vector3 gravity_body = tf2::quatRotate(
+      orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
+    return acceleration_body - gravity_body;
   }
 
   void publish_calibration_status(bool calibrated)
@@ -441,6 +471,18 @@ private:
     std_msgs::msg::Bool message;
     message.data = calibrated;
     calibration_status_publisher_->publish(message);
+  }
+
+  void publish_visual_tracking(bool tracking)
+  {
+    if (visual_tracking_status_published_ && tracking == visual_tracking_) {
+      return;
+    }
+    visual_tracking_ = tracking;
+    visual_tracking_status_published_ = true;
+    std_msgs::msg::Bool message;
+    message.data = tracking;
+    visual_tracking_publisher_->publish(message);
   }
 
   void publish_calibrated_imu(
@@ -473,6 +515,7 @@ private:
       return;
     }
     if (!has_intrinsics_) {
+      publish_visual_tracking(false);
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
         "VIO has no camera intrinsics; waiting for %s or nonzero fx/fy parameters",
@@ -492,11 +535,13 @@ private:
     try {
       gray = grayscale_image(message);
     } catch (const std::exception & error) {
+      publish_visual_tracking(false);
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "Cannot convert VIO image: %s", error.what());
       return;
     }
     if (gray.empty()) {
+      publish_visual_tracking(false);
       return;
     }
     if (image_processing_scale_ < 0.999) {
@@ -509,6 +554,7 @@ private:
 
     if (previous_gray_.empty()) {
       reset_visual_reference(gray, stamp);
+      publish_visual_tracking(false);
       return;
     }
     const double dt = (stamp - previous_image_stamp_).seconds();
@@ -517,13 +563,16 @@ private:
         get_logger(), *get_clock(), 5000,
         "Resetting visual tracker after invalid image interval %.3f s", dt);
       reset_visual_reference(gray, stamp);
+      publish_visual_tracking(false);
       return;
     }
     if (previous_points_.size() < static_cast<std::size_t>(min_tracked_features_)) {
       reset_visual_reference(gray, stamp);
+      publish_visual_tracking(false);
       return;
     }
 
+    bool visual_update_accepted = false;
     try {
       std::vector<cv::Point2f> current_points;
       std::vector<unsigned char> status;
@@ -548,7 +597,7 @@ private:
       }
 
       if (valid_current.size() >= static_cast<std::size_t>(min_tracked_features_)) {
-        apply_visual_update(valid_previous, valid_current, dt);
+        visual_update_accepted = apply_visual_update(valid_previous, valid_current, dt);
       } else {
         RCLCPP_DEBUG(
           get_logger(), "Only %zu visual tracks survived; need %d",
@@ -558,6 +607,7 @@ private:
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "Visual tracking failed: %s", error.what());
     }
+    publish_visual_tracking(visual_update_accepted);
     reset_visual_reference(gray, stamp);
   }
 
@@ -576,7 +626,7 @@ private:
     previous_image_orientation_ = orientation_;
   }
 
-  void apply_visual_update(
+  bool apply_visual_update(
     const std::vector<cv::Point2f> & previous_points,
     const std::vector<cv::Point2f> & current_points,
     double dt)
@@ -604,7 +654,7 @@ private:
       normalized_previous, normalized_current, normalized_camera_matrix, cv::RANSAC,
       ransac_probability_, normalized_ransac_threshold, inlier_mask);
     if (essential.empty()) {
-      return;
+      return false;
     }
 
     cv::Mat relative_rotation;
@@ -613,7 +663,7 @@ private:
       essential, normalized_previous, normalized_current, normalized_camera_matrix,
       relative_rotation, relative_translation, inlier_mask);
     if (inliers < min_tracked_features_) {
-      return;
+      return false;
     }
 
     tf2::Matrix3x3 current_from_previous(
@@ -628,7 +678,7 @@ private:
     const double visual_angle = relative_orientation.getAngleShortestPath();
     if (!std::isfinite(visual_angle) || visual_angle > max_visual_rotation_rad_) {
       RCLCPP_DEBUG(get_logger(), "Rejected %.3f rad visual rotation", visual_angle);
-      return;
+      return false;
     }
 
     const tf2::Quaternion previous_camera_orientation =
@@ -665,9 +715,12 @@ private:
       velocity_ = velocity_.lerp(measured_velocity, visual_velocity_weight_);
     }
 
-    RCLCPP_DEBUG(
-      get_logger(), "Visual update accepted with %d/%zu inliers and scale %.4f m",
-      inliers, current_points.size(), scale);
+    ++accepted_visual_updates_;
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "Visual odometry active: %zu updates accepted; latest %d/%zu inliers, scale %.4f m",
+      accepted_visual_updates_, inliers, current_points.size(), scale);
+    return true;
   }
 
   void publish_odometry(const rclcpp::Time & stamp)
@@ -716,6 +769,8 @@ private:
   bool has_intrinsics_ = false;
   bool initialized_ = false;
   bool calibrate_on_startup_ = true;
+  bool visual_tracking_ = false;
+  bool visual_tracking_status_published_ = false;
 
   double fx_ = 0.0;
   double fy_ = 0.0;
@@ -739,11 +794,14 @@ private:
   double gravity_mps2_ = 9.80665;
   double calibrated_gyro_deadband_rad_s_ = 0.02;
   double calibrated_accel_deadband_mps2_ = 0.20;
+  double accelerometer_tilt_correction_weight_ = 0.02;
+  double accelerometer_gravity_tolerance_mps2_ = 1.5;
   double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
   int startup_initialization_samples_ = 100;
   int active_initialization_samples_ = 20;
   int initialization_count_ = 0;
+  std::size_t accepted_visual_updates_ = 0;
   double max_imu_gap_sec_ = 0.25;
   double max_image_gap_sec_ = 1.0;
   double position_variance_ = 0.05;
@@ -759,8 +817,6 @@ private:
   tf2::Vector3 velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 angular_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
-  tf2::Vector3 accel_bias_{0.0, 0.0, 0.0};
-  tf2::Vector3 stationary_acceleration_body_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 acceleration_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_image_position_{0.0, 0.0, 0.0};
@@ -772,6 +828,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr calibrated_imu_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr visual_tracking_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;

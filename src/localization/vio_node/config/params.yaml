@@ -36,6 +36,10 @@ vio_node:
     gravity_mps2: 9.80665
     calibrated_gyro_deadband_rad_s: 0.02
     calibrated_accel_deadband_mps2: 0.20
+    # Correct slow roll/pitch gyro drift only when measured acceleration is
+    # close enough to gravity to be a trustworthy tilt reference.
+    accelerometer_tilt_correction_weight: 0.02
+    accelerometer_gravity_tolerance_mps2: 1.5
     calibrate_on_startup: true
     # Automatic startup alignment uses a longer window. The manual calibration
     # service below remains at 20 samples for a fast button response.

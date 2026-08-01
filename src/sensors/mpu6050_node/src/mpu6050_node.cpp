@@ -24,6 +24,7 @@ constexpr uint8_t kRegisterConfig = 0x1A;
 constexpr uint8_t kRegisterGyroConfig = 0x1B;
 constexpr uint8_t kRegisterAccelConfig = 0x1C;
 constexpr uint8_t kRegisterAccelOut = 0x3B;
+constexpr uint8_t kRegisterWhoAmI = 0x75;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kGravity = 9.80665;
 constexpr double kDegToRad = kPi / 180.0;
@@ -34,6 +35,10 @@ int rangeBits(int value, const std::array<int, 4> & allowed, const std::string &
     throw std::runtime_error(name + " has an unsupported MPU6050 range");
   }
   return static_cast<int>(std::distance(allowed.begin(), found));
+}
+
+int rangeFromRegister(uint8_t value, const std::array<int, 4> & allowed) {
+  return allowed[(value >> 3) & 0x03];
 }
 
 double accelScale(int range_g) {
@@ -116,15 +121,53 @@ private:
   }
 
   void configureSensor() {
+    const int requested_gyro_range_dps = gyro_range_dps_;
+    const int requested_accel_range_g = accel_range_g_;
+    const uint8_t expected_gyro_config = static_cast<uint8_t>(
+      rangeBits(requested_gyro_range_dps, {250, 500, 1000, 2000}, "gyro_range_dps") << 3);
+    const uint8_t expected_accel_config = static_cast<uint8_t>(
+      rangeBits(requested_accel_range_g, {2, 4, 8, 16}, "accel_range_g") << 3);
+
     writeRegister(kRegisterPowerManagement1, 0x00);
+    usleep(100000);
     writeRegister(kRegisterSampleRateDivider, sampleRateDivider());
     writeRegister(kRegisterConfig, 0x03);
-    writeRegister(
-      kRegisterGyroConfig,
-      static_cast<uint8_t>(rangeBits(gyro_range_dps_, {250, 500, 1000, 2000}, "gyro_range_dps") << 3));
-    writeRegister(
-      kRegisterAccelConfig,
-      static_cast<uint8_t>(rangeBits(accel_range_g_, {2, 4, 8, 16}, "accel_range_g") << 3));
+    writeRegister(kRegisterGyroConfig, expected_gyro_config);
+    writeRegister(kRegisterAccelConfig, expected_accel_config);
+    usleep(10000);
+
+    uint8_t gyro_config = readRegister(kRegisterGyroConfig);
+    uint8_t accel_config = readRegister(kRegisterAccelConfig);
+    if ((gyro_config & 0x18) != expected_gyro_config ||
+      (accel_config & 0x18) != expected_accel_config)
+    {
+      RCLCPP_WARN(
+        get_logger(),
+        "MPU range write did not stick (gyro register 0x%02x, accel register 0x%02x); retrying",
+        static_cast<unsigned int>(gyro_config), static_cast<unsigned int>(accel_config));
+      writeRegister(kRegisterGyroConfig, expected_gyro_config);
+      writeRegister(kRegisterAccelConfig, expected_accel_config);
+      usleep(10000);
+      gyro_config = readRegister(kRegisterGyroConfig);
+      accel_config = readRegister(kRegisterAccelConfig);
+    }
+
+    gyro_range_dps_ = rangeFromRegister(gyro_config, {250, 500, 1000, 2000});
+    accel_range_g_ = rangeFromRegister(accel_config, {2, 4, 8, 16});
+    gyro_scale_ = gyroScale(gyro_range_dps_);
+    accel_scale_ = accelScale(accel_range_g_);
+
+    if (gyro_range_dps_ != requested_gyro_range_dps || accel_range_g_ != requested_accel_range_g) {
+      RCLCPP_ERROR(
+        get_logger(),
+        "MPU rejected requested ranges; decoding actual register ranges gyro=+-%d dps accel=+-%d g",
+        gyro_range_dps_, accel_range_g_);
+    }
+    RCLCPP_INFO(
+      get_logger(),
+      "MPU identity 0x%02x; range readback gyro=+-%d dps accel=+-%d g",
+      static_cast<unsigned int>(readRegister(kRegisterWhoAmI)),
+      gyro_range_dps_, accel_range_g_);
   }
 
   uint8_t sampleRateDivider() const {
@@ -146,6 +189,12 @@ private:
     if (read(fd_, buffer, length) != static_cast<ssize_t>(length)) {
       throw std::runtime_error("failed to read MPU6050 registers");
     }
+  }
+
+  uint8_t readRegister(uint8_t reg) {
+    uint8_t value = 0;
+    readRegisters(reg, &value, 1);
+    return value;
   }
 
   void publishSample() {

@@ -35,16 +35,18 @@ Keep the drone stationary while the first `startup_initialization_samples` IMU m
 received. The startup default is 100 samples; manual `/vio/calibrate` requests continue to use
 the faster 20-sample `initialization_samples` window.
 Because calibration is only requested while stationary, every finite IMU message counts toward
-the sample window; raw sensor bias is not used to reject samples before that bias is known. The
-stationary gravity magnitude also supplies an accelerometer scale correction before bias and
-gravity alignment are calculated.
+the sample window. The mean angular rate supplies gyro bias, while the stationary acceleration
+direction supplies initial roll/pitch and its magnitude supplies a scalar accelerometer scale.
+A single stationary pose cannot independently identify three-axis accelerometer bias.
 
 After calibration, `/imu/data_calibrated` contains bias-corrected angular velocity and
-acceleration zero-referenced against the measured stationary calibration vector. Both are
-approximately zero while the drone remains stationary in its calibrated pose; normal sample
-noise inside the configured gyro and acceleration deadbands is published as exactly zero.
-Tilting the drone changes the gravity vector and therefore produces a nonzero acceleration
-value. `/imu/data_raw` and the samples used internally by VIO are never changed.
+current-attitude gravity-compensated linear acceleration. Both are approximately zero while the
+drone is stationary at any orientation; normal sample noise inside the configured deadbands is
+published as exactly zero. `/imu/data_raw` and the samples used internally by VIO are unchanged.
+
+`/vio/odometry` is always propagated by the IMU, so its presence alone does not prove the camera
+path is working. `/vio/visual_tracking` is `true` only when the most recently processed image
+produced an accepted essential-matrix update. Accepted visual updates are also logged at INFO.
 Calibrate the camera and measure both sensor-to-body rotations before flight. Monocular VIO has
 no independent visual scale; poor accelerometer bias or a moving initialization will therefore
 produce poor metric translation even when visual attitude tracking looks healthy.
@@ -56,6 +58,6 @@ ros2 service call /vio/calibrate std_srvs/srv/Trigger '{}'
 ```
 
 The service returns immediately after resetting the odometry origin and visual tracker. It then
-re-estimates gyro bias, accelerometer bias, and gravity alignment during a stationary sample
+re-estimates gyro bias, accelerometer scale, and gravity alignment during a stationary sample
 window. `/vio/calibrated` changes to `false` during calibration and back to `true` when the active
 sample window is complete. Completion and the estimated biases are also reported in the log.
