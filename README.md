@@ -53,7 +53,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. With VIO enabled, the launch waits for IMU calibration before starting the camera, MI0802, cropper, or thermal overlay. It then starts depth and waits for the first depth topic before starting the MI0802 node.
+The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The camera, IMU, VIO, cropper, and rosbridge start concurrently. The MI0802 process waits only for the first depth topic before starting.
 
 To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defaults to `/dev/i2c-1`, address `0x68`, publishes raw IMU samples on `/imu/data_raw`, and publishes the chip temperature on `/imu/temperature`:
 
@@ -72,9 +72,10 @@ ros2 topic echo /vio/odometry
 ```
 
 The VIO defaults consume `/camera/color/image_raw`, `/camera/color/camera_info`, and
-`/imu/data_raw`. It latches completion on `/vio/calibrated` and publishes bias- and
-gravity-corrected values on `/imu/data_calibrated`, which are approximately zero while
-stationary. Mount rotations, feature tracking, fusion weights, and covariance values are
+`/imu/data_raw`. It latches completion on `/vio/calibrated` and publishes bias-corrected gyro
+values plus acceleration zero-referenced to the stationary startup pose on
+`/imu/data_calibrated`. Those values are approximately zero while the drone remains stationary
+in that pose. Mount rotations, feature tracking, fusion weights, and covariance values are
 configured in `src/localization/vio_node/config/params.yaml`. Replace the default mount
 rotations with measured values before flight. See the package README for estimator limitations.
 

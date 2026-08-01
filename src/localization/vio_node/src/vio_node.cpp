@@ -41,6 +41,14 @@ double clamp01(double value)
   return std::clamp(value, 0.0, 1.0);
 }
 
+tf2::Vector3 apply_deadband(const tf2::Vector3 & value, double threshold)
+{
+  return tf2::Vector3(
+    std::abs(value.x()) < threshold ? 0.0 : value.x(),
+    std::abs(value.y()) < threshold ? 0.0 : value.y(),
+    std::abs(value.z()) < threshold ? 0.0 : value.z());
+}
+
 tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::string & name)
 {
   if (rpy.size() != 3U) {
@@ -161,6 +169,10 @@ public:
       declare_parameter<double>("maximum_visual_translation_m", 2.0);
 
     gravity_mps2_ = declare_parameter<double>("gravity_mps2", 9.80665);
+    calibrated_gyro_deadband_rad_s_ =
+      declare_parameter<double>("calibrated_gyro_deadband_rad_s", 0.02);
+    calibrated_accel_deadband_mps2_ =
+      declare_parameter<double>("calibrated_accel_deadband_mps2", 0.20);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
@@ -248,7 +260,8 @@ private:
     {
       throw std::invalid_argument("invalid visual motion parameters");
     }
-    if (gravity_mps2_ <= 0.0 || initialization_samples_ < 10 ||
+    if (gravity_mps2_ <= 0.0 || calibrated_gyro_deadband_rad_s_ < 0.0 ||
+      calibrated_accel_deadband_mps2_ < 0.0 || initialization_samples_ < 10 ||
       max_imu_gap_sec_ <= 0.0 || max_image_gap_sec_ <= 0.0 ||
       maximum_visual_translation_m_ <= 0.0)
     {
@@ -331,7 +344,9 @@ private:
     velocity_ += acceleration_world * dt;
     angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
-    publish_calibrated_imu(stamp, angular_velocity, acceleration_body);
+    publish_calibrated_imu(
+      stamp, angular_velocity,
+      raw_acceleration * accel_scale_correction_ - stationary_acceleration_body_);
     publish_odometry(stamp);
   }
 
@@ -355,6 +370,7 @@ private:
     acceleration_sum_.setValue(0.0, 0.0, 0.0);
     gyro_bias_.setValue(0.0, 0.0, 0.0);
     accel_bias_.setValue(0.0, 0.0, 0.0);
+    stationary_acceleration_body_.setValue(0.0, 0.0, 0.0);
     accel_scale_correction_ = 1.0;
     position_.setValue(0.0, 0.0, 0.0);
     velocity_.setValue(0.0, 0.0, 0.0);
@@ -392,6 +408,7 @@ private:
     accel_scale_correction_ = gravity_mps2_ / measured_gravity;
     const tf2::Vector3 scaled_mean_acceleration =
       mean_acceleration * accel_scale_correction_;
+    stationary_acceleration_body_ = scaled_mean_acceleration;
     orientation_ = shortest_arc(
       scaled_mean_acceleration, tf2::Vector3(0.0, 0.0, gravity_mps2_));
     orientation_.normalize();
@@ -410,7 +427,7 @@ private:
       accel_bias_.x(), accel_bias_.y(), accel_bias_.z());
     publish_calibrated_imu(
       last_imu_stamp_, gyro - gyro_bias_,
-      acceleration * accel_scale_correction_ - accel_bias_);
+      acceleration * accel_scale_correction_ - stationary_acceleration_body_);
     publish_odometry(last_imu_stamp_);
   }
 
@@ -423,17 +440,16 @@ private:
 
   void publish_calibrated_imu(
     const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity,
-    const tf2::Vector3 & acceleration_with_gravity)
+    const tf2::Vector3 & calibrated_acceleration)
   {
-    const tf2::Vector3 gravity_body = tf2::quatRotate(
-      orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
-
     sensor_msgs::msg::Imu message;
     message.header.stamp = stamp;
     message.header.frame_id = base_frame_;
     message.orientation = quaternion_message(orientation_);
-    message.angular_velocity = vector_message(angular_velocity);
-    message.linear_acceleration = vector_message(acceleration_with_gravity - gravity_body);
+    message.angular_velocity = vector_message(
+      apply_deadband(angular_velocity, calibrated_gyro_deadband_rad_s_));
+    message.linear_acceleration = vector_message(
+      apply_deadband(calibrated_acceleration, calibrated_accel_deadband_mps2_));
     message.orientation_covariance[0] = orientation_variance_;
     message.orientation_covariance[4] = orientation_variance_;
     message.orientation_covariance[8] = orientation_variance_;
@@ -716,6 +732,8 @@ private:
   double maximum_visual_translation_m_ = 2.0;
 
   double gravity_mps2_ = 9.80665;
+  double calibrated_gyro_deadband_rad_s_ = 0.02;
+  double calibrated_accel_deadband_mps2_ = 0.20;
   double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
   int initialization_count_ = 0;
@@ -735,6 +753,7 @@ private:
   tf2::Vector3 angular_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
   tf2::Vector3 accel_bias_{0.0, 0.0, 0.0};
+  tf2::Vector3 stationary_acceleration_body_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 acceleration_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_image_position_{0.0, 0.0, 0.0};

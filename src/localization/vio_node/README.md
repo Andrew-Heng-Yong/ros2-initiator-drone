@@ -2,8 +2,8 @@
 
 `vio_node` combines raw IMU propagation with sparse monocular visual motion and publishes
 `nav_msgs/msg/Odometry` on `/vio/odometry`. It also broadcasts `odom -> base_link` unless
-`publish_tf` is disabled. Calibration state is latched on `/vio/calibrated` so launch-time
-consumers can wait without missing the completion event.
+`publish_tf` is disabled. Calibration state is latched on `/vio/calibrated` so observers do not
+miss the completion event.
 
 With `calibrate_on_startup: true` (the default), the node automatically waits for a stationary
 IMU initialization window whenever it starts. It
@@ -38,8 +38,11 @@ stationary gravity magnitude also supplies an accelerometer scale correction bef
 gravity alignment are calculated.
 
 After calibration, `/imu/data_calibrated` contains bias-corrected angular velocity and
-gravity-compensated linear acceleration. Both are approximately zero while stationary; normal
-sample noise remains. `/imu/data_raw` is never changed and remains available for diagnostics.
+acceleration zero-referenced against the measured stationary calibration vector. Both are
+approximately zero while the drone remains stationary in its calibrated pose; normal sample
+noise inside the configured gyro and acceleration deadbands is published as exactly zero.
+Tilting the drone changes the gravity vector and therefore produces a nonzero acceleration
+value. `/imu/data_raw` and the samples used internally by VIO are never changed.
 Calibrate the camera and measure both sensor-to-body rotations before flight. Monocular VIO has
 no independent visual scale; poor accelerometer bias or a moving initialization will therefore
 produce poor metric translation even when visual attitude tracking looks healthy.

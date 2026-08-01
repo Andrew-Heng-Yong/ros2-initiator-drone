@@ -8,9 +8,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import IfCondition
-from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -136,37 +135,6 @@ def generate_launch_description():
             'thermal_vfov_deg': 35.0,
         }],
     )
-    calibration_gate = ExecuteProcess(
-        cmd=[
-            'bash', '-lc',
-            [
-                'case "', start_vio, '" in true|True|1) ;; *) exit 0 ;; esac; '
-                'echo "Waiting for VIO calibration before starting camera and thermal nodes..."; '
-                'while true; do '
-                'status=$(timeout 2s ros2 topic echo /vio/calibrated std_msgs/msg/Bool '
-                '--once --qos-durability transient_local 2>/dev/null || true); '
-                'if echo "$status" | grep -q "data: true"; then '
-                'echo "VIO calibration complete; starting camera and thermal nodes."; '
-                'exit 0; '
-                'fi; '
-                'sleep 0.1; '
-                'done'
-            ],
-        ],
-        output='screen',
-    )
-    delayed_sensor_handler = RegisterEventHandler(
-        OnProcessExit(
-            target_action=calibration_gate,
-            on_exit=[
-                depth_camera_process,
-                thermal_driver_process,
-                thermal_cropper_node,
-                thermal_overlay_node,
-            ],
-        )
-    )
-
     return LaunchDescription([
         DeclareLaunchArgument(
             'start_rosbridge',
@@ -318,8 +286,10 @@ def generate_launch_description():
             default_value='false',
             description='Flip thermal coordinates vertically.',
         ),
-        delayed_sensor_handler,
-        calibration_gate,
+        depth_camera_process,
+        thermal_driver_process,
+        thermal_cropper_node,
+        thermal_overlay_node,
         Node(
             package='mpu6050_node',
             executable='mpu6050_node',
