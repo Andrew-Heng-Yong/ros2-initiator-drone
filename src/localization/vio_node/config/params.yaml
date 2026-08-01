@@ -37,6 +37,9 @@ vio_node:
     calibrated_gyro_deadband_rad_s: 0.02
     calibrated_accel_deadband_mps2: 0.20
     calibrate_on_startup: true
+    # Automatic startup alignment uses a longer window. The manual calibration
+    # service below remains at 20 samples for a fast button response.
+    startup_initialization_samples: 100
     initialization_samples: 20
     max_imu_gap_sec: 0.25
     max_image_gap_sec: 1.0

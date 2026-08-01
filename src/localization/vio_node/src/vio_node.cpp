@@ -175,6 +175,8 @@ public:
       declare_parameter<double>("calibrated_accel_deadband_mps2", 0.20);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
+    startup_initialization_samples_ =
+      declare_parameter<int>("startup_initialization_samples", 100);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
     max_image_gap_sec_ = declare_parameter<double>("max_image_gap_sec", 1.0);
 
@@ -224,11 +226,12 @@ public:
       });
 
     if (calibrate_on_startup_) {
-      reset_estimator_for_calibration();
+      reset_estimator_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
         get_logger(),
         "Automatic VIO calibration started (%d stationary samples); image=%s imu=%s output=%s",
-        initialization_samples_, image_topic_.c_str(), imu_topic_.c_str(), odom_topic_.c_str());
+        active_initialization_samples_, image_topic_.c_str(), imu_topic_.c_str(),
+        odom_topic_.c_str());
     } else {
       initialized_ = true;
       publish_calibration_status(true);
@@ -262,6 +265,7 @@ private:
     }
     if (gravity_mps2_ <= 0.0 || calibrated_gyro_deadband_rad_s_ < 0.0 ||
       calibrated_accel_deadband_mps2_ < 0.0 || initialization_samples_ < 10 ||
+      startup_initialization_samples_ < 10 ||
       max_imu_gap_sec_ <= 0.0 || max_image_gap_sec_ <= 0.0 ||
       maximum_visual_translation_m_ <= 0.0)
     {
@@ -353,7 +357,7 @@ private:
   void start_full_calibration(
     const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
-    reset_estimator_for_calibration();
+    reset_estimator_for_calibration(initialization_samples_);
     response->success = true;
     response->message = "full VIO calibration started; keep the drone stationary";
     RCLCPP_INFO(
@@ -362,9 +366,10 @@ private:
       initialization_samples_);
   }
 
-  void reset_estimator_for_calibration()
+  void reset_estimator_for_calibration(int sample_count)
   {
     initialized_ = false;
+    active_initialization_samples_ = sample_count;
     initialization_count_ = 0;
     gyro_sum_.setValue(0.0, 0.0, 0.0);
     acceleration_sum_.setValue(0.0, 0.0, 0.0);
@@ -390,7 +395,7 @@ private:
     gyro_sum_ += gyro;
     acceleration_sum_ += acceleration;
     ++initialization_count_;
-    if (initialization_count_ < initialization_samples_) {
+    if (initialization_count_ < active_initialization_samples_) {
       return;
     }
 
@@ -736,6 +741,8 @@ private:
   double calibrated_accel_deadband_mps2_ = 0.20;
   double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
+  int startup_initialization_samples_ = 100;
+  int active_initialization_samples_ = 20;
   int initialization_count_ = 0;
   double max_imu_gap_sec_ = 0.25;
   double max_image_gap_sec_ = 1.0;
