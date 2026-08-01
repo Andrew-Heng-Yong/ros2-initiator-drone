@@ -158,10 +158,6 @@ public:
     gravity_mps2_ = declare_parameter<double>("gravity_mps2", 9.80665);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
-    stationary_gyro_threshold_ =
-      declare_parameter<double>("stationary_gyro_threshold_radps", 0.15);
-    stationary_accel_tolerance_ =
-      declare_parameter<double>("stationary_accel_tolerance_mps2", 1.5);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.1);
     max_image_gap_sec_ = declare_parameter<double>("max_image_gap_sec", 0.5);
 
@@ -240,7 +236,6 @@ private:
       throw std::invalid_argument("invalid visual motion parameters");
     }
     if (gravity_mps2_ <= 0.0 || initialization_samples_ < 10 ||
-      stationary_gyro_threshold_ <= 0.0 || stationary_accel_tolerance_ <= 0.0 ||
       max_imu_gap_sec_ <= 0.0 || max_image_gap_sec_ <= 0.0 ||
       maximum_visual_translation_m_ <= 0.0)
     {
@@ -308,7 +303,8 @@ private:
     }
 
     const tf2::Vector3 angular_velocity = raw_gyro - gyro_bias_;
-    const tf2::Vector3 acceleration_body = raw_acceleration - accel_bias_;
+    const tf2::Vector3 acceleration_body =
+      raw_acceleration * accel_scale_correction_ - accel_bias_;
     const tf2::Quaternion old_orientation = orientation_;
     orientation_ = orientation_ * delta_quaternion(angular_velocity, dt);
     orientation_.normalize();
@@ -345,6 +341,7 @@ private:
     acceleration_sum_.setValue(0.0, 0.0, 0.0);
     gyro_bias_.setValue(0.0, 0.0, 0.0);
     accel_bias_.setValue(0.0, 0.0, 0.0);
+    accel_scale_correction_ = 1.0;
     position_.setValue(0.0, 0.0, 0.0);
     velocity_.setValue(0.0, 0.0, 0.0);
     angular_velocity_.setValue(0.0, 0.0, 0.0);
@@ -359,20 +356,6 @@ private:
     const tf2::Vector3 & gyro, const tf2::Vector3 & acceleration,
     const builtin_interfaces::msg::Time & stamp_message)
   {
-    const bool stationary =
-      gyro.length() <= stationary_gyro_threshold_ &&
-      std::abs(acceleration.length() - gravity_mps2_) <= stationary_accel_tolerance_;
-    if (!stationary) {
-      initialization_count_ = 0;
-      gyro_sum_.setValue(0.0, 0.0, 0.0);
-      acceleration_sum_.setValue(0.0, 0.0, 0.0);
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Keep the drone stationary for VIO initialization (gyro=%.3f rad/s accel=%.3f m/s^2)",
-        gyro.length(), acceleration.length());
-      return;
-    }
-
     gyro_sum_ += gyro;
     acceleration_sum_ += acceleration;
     ++initialization_count_;
@@ -383,16 +366,31 @@ private:
     gyro_bias_ = gyro_sum_ / static_cast<double>(initialization_count_);
     const tf2::Vector3 mean_acceleration =
       acceleration_sum_ / static_cast<double>(initialization_count_);
-    orientation_ = shortest_arc(mean_acceleration, tf2::Vector3(0.0, 0.0, gravity_mps2_));
+    const double measured_gravity = mean_acceleration.length();
+    if (measured_gravity < 0.1) {
+      initialization_count_ = 0;
+      gyro_sum_.setValue(0.0, 0.0, 0.0);
+      acceleration_sum_.setValue(0.0, 0.0, 0.0);
+      RCLCPP_WARN(get_logger(), "Cannot calibrate: accelerometer magnitude is near zero");
+      return;
+    }
+    accel_scale_correction_ = gravity_mps2_ / measured_gravity;
+    const tf2::Vector3 scaled_mean_acceleration =
+      mean_acceleration * accel_scale_correction_;
+    orientation_ = shortest_arc(
+      scaled_mean_acceleration, tf2::Vector3(0.0, 0.0, gravity_mps2_));
     orientation_.normalize();
-    accel_bias_ = mean_acceleration - tf2::quatRotate(
+    accel_bias_ = scaled_mean_acceleration - tf2::quatRotate(
       orientation_.inverse(), tf2::Vector3(0.0, 0.0, gravity_mps2_));
     last_imu_stamp_ = rclcpp::Time(stamp_message);
     initialized_ = true;
     RCLCPP_INFO(
       get_logger(),
-      "VIO initialized: gyro bias [%.5f %.5f %.5f], accel bias [%.5f %.5f %.5f]",
+      "VIO initialized after %d samples: gyro bias [%.5f %.5f %.5f], "
+      "accel scale %.5f, accel bias [%.5f %.5f %.5f]",
+      initialization_count_,
       gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(),
+      accel_scale_correction_,
       accel_bias_.x(), accel_bias_.y(), accel_bias_.z());
     publish_odometry(last_imu_stamp_);
   }
@@ -645,10 +643,9 @@ private:
   double maximum_visual_translation_m_ = 2.0;
 
   double gravity_mps2_ = 9.80665;
+  double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
   int initialization_count_ = 0;
-  double stationary_gyro_threshold_ = 0.15;
-  double stationary_accel_tolerance_ = 1.5;
   double max_imu_gap_sec_ = 0.1;
   double max_image_gap_sec_ = 0.5;
   double position_variance_ = 0.05;

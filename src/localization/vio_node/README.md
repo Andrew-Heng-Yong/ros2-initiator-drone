@@ -27,6 +27,10 @@ ros2 launch drone_control drone_launch.py \
 ```
 
 Keep the drone stationary while the first `initialization_samples` IMU messages are received.
+Because calibration is only requested while stationary, every finite IMU message counts toward
+the sample window; raw sensor bias is not used to reject samples before that bias is known. The
+stationary gravity magnitude also supplies an accelerometer scale correction before bias and
+gravity alignment are calculated.
 Calibrate the camera and measure both sensor-to-body rotations before flight. Monocular VIO has
 no independent visual scale; poor accelerometer bias or a moving initialization will therefore
 produce poor metric translation even when visual attitude tracking looks healthy.
