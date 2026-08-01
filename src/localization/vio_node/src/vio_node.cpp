@@ -22,6 +22,7 @@
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "std_srvs/srv/trigger.hpp"
 #include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
@@ -195,6 +196,14 @@ public:
       [this](sensor_msgs::msg::CameraInfo::ConstSharedPtr message) {
         on_camera_info(std::move(message));
       });
+    calibration_service_ = create_service<std_srvs::srv::Trigger>(
+      "/vio/calibrate",
+      [this](
+        const std::shared_ptr<std_srvs::srv::Trigger::Request>,
+        std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+      {
+        start_full_calibration(response);
+      });
 
     RCLCPP_INFO(
       get_logger(),
@@ -305,6 +314,31 @@ private:
     angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
     publish_odometry(stamp);
+  }
+
+  void start_full_calibration(
+    const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
+  {
+    initialized_ = false;
+    initialization_count_ = 0;
+    gyro_sum_.setValue(0.0, 0.0, 0.0);
+    acceleration_sum_.setValue(0.0, 0.0, 0.0);
+    gyro_bias_.setValue(0.0, 0.0, 0.0);
+    accel_bias_.setValue(0.0, 0.0, 0.0);
+    position_.setValue(0.0, 0.0, 0.0);
+    velocity_.setValue(0.0, 0.0, 0.0);
+    angular_velocity_.setValue(0.0, 0.0, 0.0);
+    orientation_ = tf2::Quaternion::getIdentity();
+    previous_image_position_.setValue(0.0, 0.0, 0.0);
+    previous_image_orientation_ = tf2::Quaternion::getIdentity();
+    previous_gray_.release();
+    previous_points_.clear();
+    response->success = true;
+    response->message = "full VIO calibration started; keep the drone stationary";
+    RCLCPP_INFO(
+      get_logger(),
+      "Full VIO calibration started; resetting pose and collecting %d stationary samples",
+      initialization_samples_);
   }
 
   void collect_initialization_sample(
@@ -628,6 +662,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> transform_broadcaster_;
 };
 

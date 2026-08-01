@@ -29,3 +29,13 @@ Keep the drone stationary while the first `initialization_samples` IMU messages 
 Calibrate the camera and measure both sensor-to-body rotations before flight. Monocular VIO has
 no independent visual scale; poor accelerometer bias or a moving initialization will therefore
 produce poor metric translation even when visual attitude tracking looks healthy.
+
+Request a full VIO recalibration while the drone is stationary:
+
+```bash
+ros2 service call /vio/calibrate std_srvs/srv/Trigger '{}'
+```
+
+The service returns immediately after resetting the odometry origin and visual tracker. It then
+re-estimates gyro bias, accelerometer bias, and gravity alignment during a stationary sample
+window. Completion and the estimated biases are reported in the VIO node log.
