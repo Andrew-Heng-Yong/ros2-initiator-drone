@@ -29,6 +29,7 @@ def generate_launch_description():
     start_imu = LaunchConfiguration('start_imu')
     start_vio = LaunchConfiguration('start_vio')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
+    color_fps = LaunchConfiguration('color_fps')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_device = LaunchConfiguration('thermal_device')
@@ -59,6 +60,7 @@ def generate_launch_description():
         cmd=[
             'ros2', 'launch', 'orbbec_camera', 'gemini_e.launch.py',
             ['enable_color:=', enable_color_camera],
+            ['color_fps:=', color_fps],
             'enable_depth:=true',
             'depth_width:=640',
             'depth_height:=480',
@@ -160,6 +162,11 @@ def generate_launch_description():
             'enable_color_camera',
             default_value=start_vio,
             description='Enable Orbbec RGB on /camera/color/image_raw (defaults to start_vio).',
+        ),
+        DeclareLaunchArgument(
+            'color_fps',
+            default_value='5',
+            description='Orbbec RGB stream frame rate used by VIO.',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',

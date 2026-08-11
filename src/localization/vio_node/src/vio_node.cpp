@@ -140,6 +140,8 @@ public:
     calibrated_imu_topic_ =
       declare_parameter<std::string>("calibrated_imu_topic", "/imu/data_calibrated");
     odom_topic_ = declare_parameter<std::string>("odom_topic", "/vio/odometry");
+    video_status_topic_ =
+      declare_parameter<std::string>("video_status_topic", "/vio/video_working");
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
@@ -206,6 +208,8 @@ public:
       "/vio/calibrated", rclcpp::QoS(1).reliable().transient_local());
     visual_tracking_publisher_ = create_publisher<std_msgs::msg::Bool>(
       "/vio/visual_tracking", rclcpp::QoS(1).reliable().transient_local());
+    video_status_publisher_ = create_publisher<std_msgs::msg::Bool>(
+      video_status_topic_, rclcpp::QoS(1).reliable());
     if (publish_tf_) {
       transform_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -252,7 +256,7 @@ private:
   void validate_parameters() const
   {
     if (image_topic_.empty() || imu_topic_.empty() || calibrated_imu_topic_.empty() ||
-      odom_topic_.empty() ||
+      odom_topic_.empty() || video_status_topic_.empty() ||
       odom_frame_.empty() || base_frame_.empty())
     {
       throw std::invalid_argument("topic and frame parameters must not be empty");
@@ -409,6 +413,7 @@ private:
     previous_points_.clear();
     accepted_visual_updates_ = 0;
     publish_calibration_status(false);
+    publish_video_status(false);
     publish_visual_tracking(false);
   }
 
@@ -489,6 +494,13 @@ private:
     visual_tracking_publisher_->publish(message);
   }
 
+  void publish_video_status(bool working)
+  {
+    std_msgs::msg::Bool message;
+    message.data = working;
+    video_status_publisher_->publish(message);
+  }
+
   void publish_calibrated_imu(
     const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity,
     const tf2::Vector3 & calibrated_acceleration)
@@ -519,6 +531,7 @@ private:
       return;
     }
     if (!has_intrinsics_) {
+      publish_video_status(false);
       publish_visual_tracking(false);
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
@@ -539,12 +552,14 @@ private:
     try {
       gray = grayscale_image(message);
     } catch (const std::exception & error) {
+      publish_video_status(false);
       publish_visual_tracking(false);
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "Cannot convert VIO image: %s", error.what());
       return;
     }
     if (gray.empty()) {
+      publish_video_status(false);
       publish_visual_tracking(false);
       return;
     }
@@ -555,6 +570,9 @@ private:
         cv::INTER_AREA);
       gray = std::move(scaled);
     }
+    // A successfully decoded frame with valid intrinsics proves that the camera side of VIO is
+    // operational even when a stationary scene cannot produce a visual motion update.
+    publish_video_status(true);
 
     if (previous_gray_.empty()) {
       reset_visual_reference(gray, stamp);
@@ -767,6 +785,7 @@ private:
   std::string imu_topic_;
   std::string calibrated_imu_topic_;
   std::string odom_topic_;
+  std::string video_status_topic_;
   std::string odom_frame_;
   std::string base_frame_;
   bool publish_tf_ = true;
@@ -833,6 +852,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr calibrated_imu_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr visual_tracking_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr video_status_publisher_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_subscription_;
   rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_subscription_;

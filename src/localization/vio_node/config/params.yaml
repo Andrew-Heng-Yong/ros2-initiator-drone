@@ -5,6 +5,7 @@ vio_node:
     imu_topic: /imu/data_raw
     calibrated_imu_topic: /imu/data_calibrated
     odom_topic: /vio/odometry
+    video_status_topic: /vio/video_working
 
     odom_frame: odom
     base_frame: base_link

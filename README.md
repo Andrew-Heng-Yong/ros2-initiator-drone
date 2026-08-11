@@ -80,6 +80,10 @@ rotations, feature tracking, fusion weights, and covariance values are
 configured in `src/localization/vio_node/config/params.yaml`. Replace the default mount
 rotations with measured values before flight. See the package README for estimator limitations.
 
+The Orbbec RGB stream defaults to 5 FPS to match VIO processing and reduce camera and transport load. The lightweight
+`/vio/video_working` heartbeat reports whether VIO is receiving decodable RGB frames with valid
+camera intrinsics, even while a stationary scene produces no visual motion update.
+
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:
 

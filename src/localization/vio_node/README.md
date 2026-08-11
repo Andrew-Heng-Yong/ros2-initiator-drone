@@ -5,6 +5,11 @@
 `publish_tf` is disabled. Calibration state is latched on `/vio/calibrated` so observers do not
 miss the completion event.
 
+`/vio/video_working` publishes a lightweight Boolean heartbeat after calibration. It is `true`
+when RGB frames decode successfully and camera intrinsics are available. This is independent of
+`/vio/visual_tracking`, which only becomes `true` when visible motion produces an accepted pose
+update.
+
 With `calibrate_on_startup: true` (the default), the node automatically waits for a stationary
 IMU initialization window whenever it starts. It
 tracks Shi-Tomasi corners with pyramidal Lucas-Kanade optical flow, rejects outliers with an
@@ -12,8 +17,8 @@ essential-matrix RANSAC, corrects the propagated attitude from visual rotation, 
 IMU-propagated displacement to resolve the monocular translation scale.
 
 On the Raspberry Pi, visual tracking is limited to `visual_processing_rate_hz` and images are
-resized by `image_processing_scale`. The defaults process the 30 FPS color stream at 5 FPS and
-half resolution so optical flow does not starve 100 Hz IMU propagation.
+resized by `image_processing_scale`. The drone launch supplies RGB at the matching 5 FPS and VIO
+uses half-resolution images so optical flow does not starve 100 Hz IMU propagation.
 
 Build and run it directly:
 
