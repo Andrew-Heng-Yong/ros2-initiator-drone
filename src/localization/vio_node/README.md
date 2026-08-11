@@ -32,7 +32,7 @@ ros2 launch drone_control drone_launch.py \
 ```
 
 Keep the drone stationary while the first `startup_initialization_samples` IMU messages are
-received. The startup default is 100 samples; manual `/vio/calibrate` requests continue to use
+received. The startup default is 1000 samples; manual `/vio/calibrate` requests continue to use
 the faster 20-sample `initialization_samples` window.
 Because calibration is only requested while stationary, every finite IMU message counts toward
 the sample window. The mean angular rate supplies gyro bias, while the stationary acceleration
@@ -41,8 +41,9 @@ A single stationary pose cannot independently identify three-axis accelerometer 
 
 After calibration, `/imu/data_calibrated` contains bias-corrected angular velocity and
 current-attitude gravity-compensated linear acceleration. Both are approximately zero while the
-drone is stationary at any orientation; normal sample noise inside the configured deadbands is
-published as exactly zero. `/imu/data_raw` and the samples used internally by VIO are unchanged.
+drone is stationary at any orientation; normal sample noise inside the configured acceleration
+deadband is suppressed in both the calibrated output and odometry propagation so that it cannot
+accumulate into position drift. `/imu/data_raw` remains unchanged.
 
 `/vio/odometry` is always propagated by the IMU, so its presence alone does not prove the camera
 path is working. `/vio/visual_tracking` is `true` only when the most recently processed image

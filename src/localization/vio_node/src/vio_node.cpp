@@ -180,7 +180,7 @@ public:
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
     startup_initialization_samples_ =
-      declare_parameter<int>("startup_initialization_samples", 100);
+      declare_parameter<int>("startup_initialization_samples", 1000);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
     max_image_gap_sec_ = declare_parameter<double>("max_image_gap_sec", 1.0);
 
@@ -362,9 +362,13 @@ private:
 
     tf2::Quaternion midpoint_orientation = old_orientation.slerp(orientation_, 0.5);
     midpoint_orientation.normalize();
-    const tf2::Vector3 acceleration_world =
+    // Gravity removal is never exact: accelerometer noise and tiny attitude errors leave a
+    // residual which otherwise gets integrated twice into an unbounded position drift. Use the
+    // same deadband advertised by the calibrated IMU output for estimator propagation as well.
+    const tf2::Vector3 acceleration_world = apply_deadband(
       tf2::quatRotate(midpoint_orientation, acceleration_body) -
-      tf2::Vector3(0.0, 0.0, gravity_mps2_);
+      tf2::Vector3(0.0, 0.0, gravity_mps2_),
+      calibrated_accel_deadband_mps2_);
     position_ += velocity_ * dt + acceleration_world * (0.5 * dt * dt);
     velocity_ += acceleration_world * dt;
     angular_velocity_ = angular_velocity;
@@ -798,7 +802,7 @@ private:
   double accelerometer_gravity_tolerance_mps2_ = 1.5;
   double accel_scale_correction_ = 1.0;
   int initialization_samples_ = 20;
-  int startup_initialization_samples_ = 100;
+  int startup_initialization_samples_ = 1000;
   int active_initialization_samples_ = 20;
   int initialization_count_ = 0;
   std::size_t accepted_visual_updates_ = 0;

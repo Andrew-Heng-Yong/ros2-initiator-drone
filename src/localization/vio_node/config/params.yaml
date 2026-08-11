@@ -35,6 +35,7 @@ vio_node:
 
     gravity_mps2: 9.80665
     calibrated_gyro_deadband_rad_s: 0.02
+    # Suppress gravity-removal noise in both calibrated IMU output and odometry propagation.
     calibrated_accel_deadband_mps2: 0.20
     # Correct slow roll/pitch gyro drift only when measured acceleration is
     # close enough to gravity to be a trustworthy tilt reference.
@@ -43,7 +44,7 @@ vio_node:
     calibrate_on_startup: true
     # Automatic startup alignment uses a longer window. The manual calibration
     # service below remains at 20 samples for a fast button response.
-    startup_initialization_samples: 100
+    startup_initialization_samples: 1000
     initialization_samples: 20
     max_imu_gap_sec: 0.25
     max_image_gap_sec: 1.0
