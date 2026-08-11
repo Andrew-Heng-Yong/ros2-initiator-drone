@@ -30,6 +30,7 @@ def generate_launch_description():
     start_vio = LaunchConfiguration('start_vio')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
     color_fps = LaunchConfiguration('color_fps')
+    vio_static_override = LaunchConfiguration('vio_static_override')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_device = LaunchConfiguration('thermal_device')
@@ -167,6 +168,11 @@ def generate_launch_description():
             'color_fps',
             default_value='5',
             description='Orbbec RGB stream frame rate used by VIO.',
+        ),
+        DeclareLaunchArgument(
+            'vio_static_override',
+            default_value='false',
+            description='Skip VIO alignment and publish a fixed zero-motion estimate.',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',
@@ -311,7 +317,9 @@ def generate_launch_description():
             name='vio_node',
             output='screen',
             condition=IfCondition(start_vio),
-            parameters=[vio_params],
+            parameters=[vio_params, {
+                'static_override': ParameterValue(vio_static_override, value_type=bool),
+            }],
         ),
         Node(
             package='rosbridge_server',

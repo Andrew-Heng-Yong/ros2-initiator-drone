@@ -10,6 +10,11 @@ when RGB frames decode successfully and camera intrinsics are available. This is
 `/vio/visual_tracking`, which only becomes `true` when visible motion produces an accepted pose
 update.
 
+Set `static_override: true` only when the robot is known to remain stationary. It skips startup
+alignment and visual tracking, rejects manual calibration requests, and continuously publishes a
+fixed zero position and velocity, zero calibrated angular velocity and acceleration, and a valid
+identity orientation. Restart the node after changing this mode.
+
 With `calibrate_on_startup: true` (the default), the node automatically waits for a stationary
 IMU initialization window whenever it starts. It
 tracks Shi-Tomasi corners with pyramidal Lucas-Kanade optical flow, rejects outliers with an

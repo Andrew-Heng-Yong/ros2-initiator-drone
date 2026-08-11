@@ -42,6 +42,9 @@ vio_node:
     # close enough to gravity to be a trustworthy tilt reference.
     accelerometer_tilt_correction_weight: 0.02
     accelerometer_gravity_tolerance_mps2: 1.5
+    # Bypass alignment/fusion and publish a fixed identity pose with zero motion.
+    # Use only when the robot is known to remain stationary.
+    static_override: false
     calibrate_on_startup: true
     # Automatic startup alignment uses a longer window. The manual calibration
     # service below remains at 20 samples for a fast button response.

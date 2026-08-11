@@ -179,6 +179,7 @@ public:
       declare_parameter<double>("accelerometer_tilt_correction_weight", 0.02));
     accelerometer_gravity_tolerance_mps2_ =
       declare_parameter<double>("accelerometer_gravity_tolerance_mps2", 1.5);
+    static_override_ = declare_parameter<bool>("static_override", false);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 20);
     startup_initialization_samples_ =
@@ -235,7 +236,16 @@ public:
         start_full_calibration(response);
       });
 
-    if (calibrate_on_startup_) {
+    if (static_override_) {
+      initialized_ = true;
+      publish_calibration_status(false);
+      publish_video_status(false);
+      publish_visual_tracking(false);
+      RCLCPP_WARN(
+        get_logger(),
+        "VIO static override active: startup alignment and visual tracking are disabled; "
+        "publishing a fixed zero-motion estimate");
+    } else if (calibrate_on_startup_) {
       reset_estimator_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
         get_logger(),
@@ -308,6 +318,11 @@ private:
 
   void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr & message)
   {
+    if (static_override_) {
+      publish_static_outputs(rclcpp::Time(message->header.stamp));
+      return;
+    }
+
     const tf2::Vector3 raw_gyro = tf2::quatRotate(
       imu_to_body_, tf2::Vector3(
         message->angular_velocity.x, message->angular_velocity.y,
@@ -385,6 +400,11 @@ private:
   void start_full_calibration(
     const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
+    if (static_override_) {
+      response->success = false;
+      response->message = "calibration is disabled while the VIO static override is active";
+      return;
+    }
     reset_estimator_for_calibration(initialization_samples_);
     response->success = true;
     response->message = "full VIO calibration started; keep the drone stationary";
@@ -525,8 +545,41 @@ private:
     calibrated_imu_publisher_->publish(message);
   }
 
+  void publish_static_outputs(const rclcpp::Time & stamp)
+  {
+    position_.setValue(0.0, 0.0, 0.0);
+    velocity_.setValue(0.0, 0.0, 0.0);
+    angular_velocity_.setValue(0.0, 0.0, 0.0);
+    orientation_ = tf2::Quaternion::getIdentity();
+    last_imu_stamp_ = stamp;
+
+    sensor_msgs::msg::Imu imu;
+    imu.header.stamp = stamp;
+    imu.header.frame_id = base_frame_;
+    imu.orientation = quaternion_message(orientation_);
+    calibrated_imu_publisher_->publish(imu);
+
+    nav_msgs::msg::Odometry odometry;
+    odometry.header.stamp = stamp;
+    odometry.header.frame_id = odom_frame_;
+    odometry.child_frame_id = base_frame_;
+    odometry.pose.pose.orientation = quaternion_message(orientation_);
+    odometry_publisher_->publish(odometry);
+
+    if (transform_broadcaster_) {
+      geometry_msgs::msg::TransformStamped transform;
+      transform.header = odometry.header;
+      transform.child_frame_id = base_frame_;
+      transform.transform.rotation = quaternion_message(orientation_);
+      transform_broadcaster_->sendTransform(transform);
+    }
+  }
+
   void on_image(const sensor_msgs::msg::Image::ConstSharedPtr & message)
   {
+    if (static_override_) {
+      return;
+    }
     if (!initialized_) {
       return;
     }
@@ -791,6 +844,7 @@ private:
   bool publish_tf_ = true;
   bool has_intrinsics_ = false;
   bool initialized_ = false;
+  bool static_override_ = false;
   bool calibrate_on_startup_ = true;
   bool visual_tracking_ = false;
   bool visual_tracking_status_published_ = false;
