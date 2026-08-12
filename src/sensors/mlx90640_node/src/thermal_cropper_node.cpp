@@ -274,7 +274,8 @@ public:
     flip_thermal_x_ = declare_parameter<bool>("flip_thermal_x", true);
     flip_thermal_y_ = declare_parameter<bool>("flip_thermal_y", false);
     passthrough_when_no_region_ = declare_parameter<bool>("passthrough_when_no_region", true);
-    output_decimation_ = std::clamp(declare_parameter<int>("output_decimation", 2), 1, 8);
+    output_decimation_ = static_cast<int>(std::clamp<int64_t>(
+      declare_parameter<int64_t>("output_decimation", 2), 1, 8));
 
     // These streams are live visualizations: once a newer sample exists, an
     // older one only adds latency. Keep a single reliable output so rosbridge
