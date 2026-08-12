@@ -132,11 +132,94 @@ sensor_msgs::msg::Image mask_image_by_pixel_mask(
   return output;
 }
 
-sensor_msgs::msg::CameraInfo mask_camera_info(
-  const sensor_msgs::msg::CameraInfo & info,
-  const CropRegion & roi)
+int decimated_length(int length, int decimation)
 {
+  return (length + decimation - 1) / decimation;
+}
+
+sensor_msgs::msg::Image crop_and_decimate_image(
+  const sensor_msgs::msg::Image & image,
+  const CropRegion & roi,
+  int decimation,
+  const std::vector<int> * selected_pixels = nullptr)
+{
+  const int bpp = bytes_per_pixel(image);
+  const int source_width = static_cast<int>(image.width);
+  const int source_height = static_cast<int>(image.height);
+  decimation = std::max(1, decimation);
+  if (
+    bpp <= 0 || roi.x < 0 || roi.y < 0 || roi.width <= 0 || roi.height <= 0 ||
+    roi.x + roi.width > source_width || roi.y + roi.height > source_height)
+  {
+    return black_image_like(image);
+  }
+
+  auto output = image;
+  output.width = static_cast<uint32_t>(decimated_length(roi.width, decimation));
+  output.height = static_cast<uint32_t>(decimated_length(roi.height, decimation));
+  output.step = output.width * static_cast<uint32_t>(bpp);
+  output.data.assign(static_cast<size_t>(output.step) * output.height, 0);
+
+  const auto copy_pixel = [&](int source_x, int source_y) {
+    const int relative_x = source_x - roi.x;
+    const int relative_y = source_y - roi.y;
+    if (relative_x % decimation != 0 || relative_y % decimation != 0) {
+      return;
+    }
+    const int output_x = relative_x / decimation;
+    const int output_y = relative_y / decimation;
+    const auto source_offset =
+      static_cast<size_t>(source_y) * image.step + static_cast<size_t>(source_x) * bpp;
+    const auto output_offset =
+      static_cast<size_t>(output_y) * output.step + static_cast<size_t>(output_x) * bpp;
+    if (
+      source_offset + static_cast<size_t>(bpp) <= image.data.size() &&
+      output_offset + static_cast<size_t>(bpp) <= output.data.size())
+    {
+      std::copy_n(
+        image.data.begin() + static_cast<long>(source_offset), bpp,
+        output.data.begin() + static_cast<long>(output_offset));
+    }
+  };
+
+  if (selected_pixels != nullptr) {
+    for (const int source_pixel : *selected_pixels) {
+      copy_pixel(source_pixel % source_width, source_pixel / source_width);
+    }
+  } else {
+    for (int output_y = 0; output_y < static_cast<int>(output.height); ++output_y) {
+      const int source_y = roi.y + output_y * decimation;
+      for (int output_x = 0; output_x < static_cast<int>(output.width); ++output_x) {
+        copy_pixel(roi.x + output_x * decimation, source_y);
+      }
+    }
+  }
+  return output;
+}
+
+sensor_msgs::msg::CameraInfo crop_and_decimate_camera_info(
+  const sensor_msgs::msg::CameraInfo & info,
+  const CropRegion & roi,
+  int decimation)
+{
+  decimation = std::max(1, decimation);
+  const double scale = 1.0 / static_cast<double>(decimation);
   auto output = info;
+  output.width = static_cast<uint32_t>(decimated_length(roi.width, decimation));
+  output.height = static_cast<uint32_t>(decimated_length(roi.height, decimation));
+
+  output.k[0] *= scale;
+  output.k[2] = (output.k[2] - roi.x) * scale;
+  output.k[4] *= scale;
+  output.k[5] = (output.k[5] - roi.y) * scale;
+
+  output.p[0] *= scale;
+  output.p[2] = (output.p[2] - roi.x) * scale;
+  output.p[3] *= scale;
+  output.p[5] *= scale;
+  output.p[6] = (output.p[6] - roi.y) * scale;
+  output.p[7] *= scale;
+
   output.roi.x_offset = static_cast<uint32_t>(roi.x);
   output.roi.y_offset = static_cast<uint32_t>(roi.y);
   output.roi.width = static_cast<uint32_t>(roi.width);
@@ -191,24 +274,34 @@ public:
     flip_thermal_x_ = declare_parameter<bool>("flip_thermal_x", true);
     flip_thermal_y_ = declare_parameter<bool>("flip_thermal_y", false);
     passthrough_when_no_region_ = declare_parameter<bool>("passthrough_when_no_region", true);
+    output_decimation_ = std::clamp(declare_parameter<int>("output_decimation", 2), 1, 8);
 
-    depth_pub_ = create_publisher<sensor_msgs::msg::Image>(output_depth_topic_, 10);
-    thermal_pub_ = create_publisher<sensor_msgs::msg::Image>(output_thermal_topic_, 10);
-    camera_info_pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(output_camera_info_topic_, 10);
-    roi_pub_ = create_publisher<sensor_msgs::msg::RegionOfInterest>(output_roi_topic_, 10);
+    // These streams are live visualizations: once a newer sample exists, an
+    // older one only adds latency. Keep a single reliable output so rosbridge
+    // cannot build a ROS-side history of obsolete depth frames.
+    const auto latest_output_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable();
+    depth_pub_ = create_publisher<sensor_msgs::msg::Image>(
+      output_depth_topic_, latest_output_qos);
+    thermal_pub_ = create_publisher<sensor_msgs::msg::Image>(
+      output_thermal_topic_, latest_output_qos);
+    camera_info_pub_ = create_publisher<sensor_msgs::msg::CameraInfo>(
+      output_camera_info_topic_, latest_output_qos);
+    roi_pub_ = create_publisher<sensor_msgs::msg::RegionOfInterest>(
+      output_roi_topic_, latest_output_qos);
 
+    const auto latest_sensor_qos = rclcpp::SensorDataQoS().keep_last(1);
     thermal_sub_ = create_subscription<sensor_msgs::msg::Image>(
-      thermal_topic_, rclcpp::SensorDataQoS(),
+      thermal_topic_, latest_sensor_qos,
       [this](sensor_msgs::msg::Image::ConstSharedPtr msg) {
         handle_thermal(*msg);
       });
     depth_sub_ = create_subscription<sensor_msgs::msg::Image>(
-      depth_topic_, rclcpp::SensorDataQoS(),
+      depth_topic_, latest_sensor_qos,
       [this](sensor_msgs::msg::Image::ConstSharedPtr msg) {
         handle_depth(*msg);
       });
     camera_info_sub_ = create_subscription<sensor_msgs::msg::CameraInfo>(
-      depth_camera_info_topic_, 10,
+      depth_camera_info_topic_, rclcpp::QoS(rclcpp::KeepLast(1)).reliable(),
       [this](sensor_msgs::msg::CameraInfo::ConstSharedPtr msg) {
         latest_camera_info_ = *msg;
         have_camera_info_ = true;
@@ -222,11 +315,12 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "Thermal cropper enabled=%s passthrough_when_no_region=%s min_region_size=%d "
-      "barrel_distortion=%.3f",
+      "barrel_distortion=%.3f output_decimation=%d",
       enabled_ ? "true" : "false",
       passthrough_when_no_region_ ? "true" : "false",
       min_region_size_,
-      thermal_barrel_distortion_);
+      thermal_barrel_distortion_,
+      output_decimation_);
   }
 
 private:
@@ -254,6 +348,8 @@ private:
         highlight_max_delta_from_frame_high_ = std::max(0.0, parameter.as_double());
       } else if (name == "passthrough_when_no_region") {
         passthrough_when_no_region_ = parameter.as_bool();
+      } else if (name == "output_decimation") {
+        output_decimation_ = static_cast<int>(std::clamp<int64_t>(parameter.as_int(), 1, 8));
       } else if (name == "depth_fov_horizontal") {
         depth_hfov_deg_ = parameter.as_double();
         geometry_changed = true;
@@ -332,44 +428,30 @@ private:
   {
     if (!enabled_) {
       if (passthrough_when_no_region_) {
-        depth_pub_->publish(image);
-        if (have_camera_info_) {
-          auto info = latest_camera_info_;
-          info.header = image.header;
-          camera_info_pub_->publish(info);
-        }
+        publish_uncropped_depth(image);
       }
       return;
     }
     CropRegion roi;
     if (have_crop_) {
-      auto output = mask_depth_by_thermal_mask(image, roi);
+      auto output = crop_depth_by_thermal_mask(image, roi);
       if (roi.width <= 0 || roi.height <= 0) {
         if (passthrough_when_no_region_) {
-          depth_pub_->publish(image);
-          if (have_camera_info_) {
-            auto info = latest_camera_info_;
-            info.header = image.header;
-            camera_info_pub_->publish(info);
-          }
+          publish_uncropped_depth(image);
         }
         return;
       }
+      log_depth_reduction(image, output, true);
       depth_pub_->publish(std::move(output));
     } else {
       if (passthrough_when_no_region_) {
-        depth_pub_->publish(image);
-      }
-      if (passthrough_when_no_region_ && have_camera_info_) {
-        auto info = latest_camera_info_;
-        info.header = image.header;
-        camera_info_pub_->publish(info);
+        publish_uncropped_depth(image);
       }
       return;
     }
 
     if (have_camera_info_) {
-      auto info = mask_camera_info(latest_camera_info_, roi);
+      auto info = crop_and_decimate_camera_info(latest_camera_info_, roi, output_decimation_);
       info.header = image.header;
       camera_info_pub_->publish(info);
     }
@@ -380,6 +462,35 @@ private:
     msg.height = static_cast<uint32_t>(roi.height);
     msg.do_rectify = false;
     roi_pub_->publish(msg);
+  }
+
+  void publish_uncropped_depth(const sensor_msgs::msg::Image & image)
+  {
+    const CropRegion full_frame{
+      0, 0, static_cast<int>(image.width), static_cast<int>(image.height), 0, 0};
+    auto output = crop_and_decimate_image(image, full_frame, output_decimation_);
+    log_depth_reduction(image, output, false);
+    depth_pub_->publish(std::move(output));
+    if (have_camera_info_) {
+      auto info = crop_and_decimate_camera_info(
+        latest_camera_info_, full_frame, output_decimation_);
+      info.header = image.header;
+      camera_info_pub_->publish(info);
+    }
+  }
+
+  void log_depth_reduction(
+    const sensor_msgs::msg::Image & input,
+    const sensor_msgs::msg::Image & output,
+    bool cropped)
+  {
+    const double reduction = output.data.empty() ? 0.0 :
+      static_cast<double>(input.data.size()) / static_cast<double>(output.data.size());
+    RCLCPP_INFO_THROTTLE(
+      get_logger(), *get_clock(), 5000,
+      "Depth output %ux%u (%zu bytes) -> %ux%u (%zu bytes), %.1fx smaller, %s",
+      input.width, input.height, input.data.size(), output.width, output.height,
+      output.data.size(), reduction, cropped ? "thermal ROI" : "full-FOV fallback");
   }
 
   CropRegion detect_crop(const sensor_msgs::msg::Image & image)
@@ -560,7 +671,7 @@ private:
     return true;
   }
 
-  sensor_msgs::msg::Image mask_depth_by_thermal_mask(
+  sensor_msgs::msg::Image crop_depth_by_thermal_mask(
     const sensor_msgs::msg::Image & image,
     CropRegion & roi)
   {
@@ -579,7 +690,7 @@ private:
     }
     ensure_thermal_to_depth_lookup(depth_width, depth_height, thermal_width, thermal_height);
 
-    auto output = black_image_like(image);
+    std::vector<int> selected_depth_pixels;
     int selected_left = depth_width;
     int selected_top = depth_height;
     int selected_right = -1;
@@ -591,13 +702,10 @@ private:
       for (const int depth_pixel : thermal_to_depth_pixels_[static_cast<size_t>(thermal_pixel)]) {
         const int y = depth_pixel / depth_width;
         const int x = depth_pixel % depth_width;
-        const auto offset =
+        const auto source_offset =
           static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
-        if (offset + static_cast<size_t>(bpp) <= output.data.size()) {
-          std::copy_n(
-            image.data.begin() + static_cast<long>(offset),
-            bpp,
-            output.data.begin() + static_cast<long>(offset));
+        if (source_offset + static_cast<size_t>(bpp) <= image.data.size()) {
+          selected_depth_pixels.push_back(depth_pixel);
           selected_left = std::min(selected_left, x);
           selected_top = std::min(selected_top, y);
           selected_right = std::max(selected_right, x);
@@ -613,8 +721,10 @@ private:
         selected_bottom - selected_top + 1,
         latest_crop_.cluster_size,
         latest_crop_.highlighted_count};
+      return crop_and_decimate_image(
+        image, roi, output_decimation_, &selected_depth_pixels);
     }
-    return output;
+    return black_image_like(image);
   }
 
   void ensure_thermal_to_depth_lookup(
@@ -728,6 +838,7 @@ private:
   bool flip_thermal_y_ = false;
   bool passthrough_when_no_region_ = true;
   bool enabled_ = true;
+  int output_decimation_ = 2;
 
   CropRegion latest_crop_;
   std::vector<uint8_t> latest_thermal_mask_;

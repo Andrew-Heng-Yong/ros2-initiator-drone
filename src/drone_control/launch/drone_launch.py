@@ -30,12 +30,14 @@ def generate_launch_description():
     start_vio = LaunchConfiguration('start_vio')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
     color_fps = LaunchConfiguration('color_fps')
+    depth_fps = LaunchConfiguration('depth_fps')
     vio_static_override = LaunchConfiguration('vio_static_override')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_device = LaunchConfiguration('thermal_device')
     thermal_cropper_enabled = LaunchConfiguration('thermal_cropper_enabled')
     passthrough_when_no_region = LaunchConfiguration('passthrough_when_no_region')
+    depth_output_decimation = LaunchConfiguration('depth_output_decimation')
     overlay_alpha = LaunchConfiguration('overlay_alpha')
     crop_unit_thermal_pixels = LaunchConfiguration('crop_unit_thermal_pixels')
     min_region_size = LaunchConfiguration('min_region_size')
@@ -65,7 +67,7 @@ def generate_launch_description():
             'enable_depth:=true',
             'depth_width:=640',
             'depth_height:=480',
-            'depth_fps:=5',
+            ['depth_fps:=', depth_fps],
             'enable_ir:=false',
         ],
         output='screen',
@@ -99,6 +101,7 @@ def generate_launch_description():
         parameters=[mlx90640_params, {
             'enabled': ParameterValue(thermal_cropper_enabled, value_type=bool),
             'passthrough_when_no_region': ParameterValue(passthrough_when_no_region, value_type=bool),
+            'output_decimation': ParameterValue(depth_output_decimation, value_type=int),
             'crop_unit_thermal_pixels': ParameterValue(crop_unit_thermal_pixels, value_type=int),
             'min_region_size': ParameterValue(min_region_size, value_type=int),
             'inflation_radius_thermal_pixels': ParameterValue(inflation_radius_thermal_pixels, value_type=int),
@@ -170,6 +173,11 @@ def generate_launch_description():
             description='Orbbec RGB stream frame rate used by VIO.',
         ),
         DeclareLaunchArgument(
+            'depth_fps',
+            default_value='10',
+            description='Orbbec depth frame rate; the phone stream is cropped and decimated later.',
+        ),
+        DeclareLaunchArgument(
             'vio_static_override',
             default_value='false',
             description='Skip VIO alignment and publish a fixed zero-motion estimate.',
@@ -198,6 +206,11 @@ def generate_launch_description():
             'passthrough_when_no_region',
             default_value='true',
             description='Publish uncropped frames while no thermal crop region is available.',
+        ),
+        DeclareLaunchArgument(
+            'depth_output_decimation',
+            default_value='2',
+            description='Keep every Nth depth pixel per axis on the cropped rosbridge stream.',
         ),
         DeclareLaunchArgument(
             'overlay_alpha',

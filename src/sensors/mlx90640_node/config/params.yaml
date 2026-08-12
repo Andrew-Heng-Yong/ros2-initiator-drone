@@ -37,3 +37,6 @@ thermal_cropper_node:
     flip_thermal_x: true
     flip_thermal_y: false
     passthrough_when_no_region: true
+    # Publish every second depth pixel in each axis. This quarters the raw
+    # rosbridge image payload while retaining ample density for the phone cloud.
+    output_decimation: 2
