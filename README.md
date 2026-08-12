@@ -86,7 +86,8 @@ camera intrinsics, even while a stationary scene produces no visual motion updat
 
 For stationary bench testing only, launch with `vio_static_override:=true` to skip alignment and
 visual fusion and publish a fixed zero-motion estimate. The orientation remains a valid identity
-quaternion. Disable the override and restart before the robot can move.
+quaternion. The fixed pose is reported as calibrated for visualization clients, while visual
+tracking remains disabled. Disable the override and restart before the robot can move.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:

@@ -13,7 +13,9 @@ update.
 Set `static_override: true` only when the robot is known to remain stationary. It skips startup
 alignment and visual tracking, rejects manual calibration requests, and continuously publishes a
 fixed zero position and velocity, zero calibrated angular velocity and acceleration, and a valid
-identity orientation. Restart the node after changing this mode.
+identity orientation. The intentional fixed pose is advertised as calibrated so visualization
+clients can render it; `/vio/visual_tracking` remains `false` because visual fusion is disabled.
+Restart the node after changing this mode.
 
 With `calibrate_on_startup: true` (the default), the node automatically waits for a stationary
 IMU initialization window whenever it starts. It

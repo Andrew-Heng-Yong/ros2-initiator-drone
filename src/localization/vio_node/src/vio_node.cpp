@@ -238,13 +238,17 @@ public:
 
     if (static_override_) {
       initialized_ = true;
-      publish_calibration_status(false);
+      // Static override supplies an intentional, fixed odometry reference. Mark
+      // that synthetic pose as calibrated so consumers can render it, while
+      // keeping visual tracking false to make clear that no visual fusion is
+      // taking place.
+      publish_calibration_status(true);
       publish_video_status(false);
       publish_visual_tracking(false);
       RCLCPP_WARN(
         get_logger(),
         "VIO static override active: startup alignment and visual tracking are disabled; "
-        "publishing a fixed zero-motion estimate");
+        "publishing a fixed zero-motion estimate marked calibrated for consumers");
     } else if (calibrate_on_startup_) {
       reset_estimator_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
