@@ -96,6 +96,13 @@ CameraInfo dimensions and intrinsics are adjusted to match, so point-cloud geome
 The depth camera remains on the project's verified 5 fps profile. Use
 `depth_output_decimation:=1` when full cropped resolution is required.
 
+Crop detection thresholds the native thermal pixels, groups occupied analysis cells into
+8-connected components, selects the largest component (breaking ties by its true hot-pixel count),
+and inflates only that component's real highlighted pixels. A three-frame hold prevents brief
+thermal threshold dropouts from switching the depth stream between cropped and full-frame output.
+Depth projection uses one contiguous cached depth-to-thermal lookup rather than a vector per
+thermal pixel, keeping per-frame work bounded and cache-friendly.
+
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:
 

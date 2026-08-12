@@ -4,7 +4,6 @@
 #include <cstring>
 #include <limits>
 #include <memory>
-#include <queue>
 #include <string>
 #include <utility>
 #include <vector>
@@ -141,7 +140,8 @@ sensor_msgs::msg::Image crop_and_decimate_image(
   const sensor_msgs::msg::Image & image,
   const CropRegion & roi,
   int decimation,
-  const std::vector<int> * selected_pixels = nullptr)
+  const std::vector<int32_t> * depth_to_thermal = nullptr,
+  const std::vector<uint8_t> * thermal_mask = nullptr)
 {
   const int bpp = bytes_per_pixel(image);
   const int source_width = static_cast<int>(image.width);
@@ -160,37 +160,40 @@ sensor_msgs::msg::Image crop_and_decimate_image(
   output.step = output.width * static_cast<uint32_t>(bpp);
   output.data.assign(static_cast<size_t>(output.step) * output.height, 0);
 
-  const auto copy_pixel = [&](int source_x, int source_y) {
-    const int relative_x = source_x - roi.x;
-    const int relative_y = source_y - roi.y;
-    if (relative_x % decimation != 0 || relative_y % decimation != 0) {
-      return;
-    }
-    const int output_x = relative_x / decimation;
-    const int output_y = relative_y / decimation;
-    const auto source_offset =
-      static_cast<size_t>(source_y) * image.step + static_cast<size_t>(source_x) * bpp;
-    const auto output_offset =
-      static_cast<size_t>(output_y) * output.step + static_cast<size_t>(output_x) * bpp;
-    if (
-      source_offset + static_cast<size_t>(bpp) <= image.data.size() &&
-      output_offset + static_cast<size_t>(bpp) <= output.data.size())
-    {
-      std::copy_n(
-        image.data.begin() + static_cast<long>(source_offset), bpp,
-        output.data.begin() + static_cast<long>(output_offset));
-    }
-  };
+  const bool apply_mask = depth_to_thermal != nullptr && thermal_mask != nullptr;
+  if (
+    apply_mask && depth_to_thermal->size() !=
+    static_cast<size_t>(source_width) * source_height)
+  {
+    return output;
+  }
 
-  if (selected_pixels != nullptr) {
-    for (const int source_pixel : *selected_pixels) {
-      copy_pixel(source_pixel % source_width, source_pixel / source_width);
-    }
-  } else {
-    for (int output_y = 0; output_y < static_cast<int>(output.height); ++output_y) {
-      const int source_y = roi.y + output_y * decimation;
-      for (int output_x = 0; output_x < static_cast<int>(output.width); ++output_x) {
-        copy_pixel(roi.x + output_x * decimation, source_y);
+  for (int output_y = 0; output_y < static_cast<int>(output.height); ++output_y) {
+    const int source_y = roi.y + output_y * decimation;
+    for (int output_x = 0; output_x < static_cast<int>(output.width); ++output_x) {
+      const int source_x = roi.x + output_x * decimation;
+      const auto source_pixel = static_cast<size_t>(source_y) * source_width + source_x;
+      if (apply_mask) {
+        const int32_t thermal_pixel = (*depth_to_thermal)[source_pixel];
+        if (
+          thermal_pixel < 0 || static_cast<size_t>(thermal_pixel) >= thermal_mask->size() ||
+          !(*thermal_mask)[static_cast<size_t>(thermal_pixel)])
+        {
+          continue;
+        }
+      }
+
+      const auto source_offset =
+        static_cast<size_t>(source_y) * image.step + static_cast<size_t>(source_x) * bpp;
+      const auto output_offset =
+        static_cast<size_t>(output_y) * output.step + static_cast<size_t>(output_x) * bpp;
+      if (
+        source_offset + static_cast<size_t>(bpp) <= image.data.size() &&
+        output_offset + static_cast<size_t>(bpp) <= output.data.size())
+      {
+        std::copy_n(
+          image.data.begin() + static_cast<long>(source_offset), bpp,
+          output.data.begin() + static_cast<long>(output_offset));
       }
     }
   }
@@ -274,6 +277,8 @@ public:
     flip_thermal_x_ = declare_parameter<bool>("flip_thermal_x", true);
     flip_thermal_y_ = declare_parameter<bool>("flip_thermal_y", false);
     passthrough_when_no_region_ = declare_parameter<bool>("passthrough_when_no_region", true);
+    crop_hold_frames_ = static_cast<int>(std::max<int64_t>(
+      0, declare_parameter<int64_t>("crop_hold_frames", 3)));
     output_decimation_ = static_cast<int>(std::clamp<int64_t>(
       declare_parameter<int64_t>("output_decimation", 2), 1, 8));
 
@@ -316,11 +321,12 @@ public:
     RCLCPP_INFO(
       get_logger(),
       "Thermal cropper enabled=%s passthrough_when_no_region=%s min_region_size=%d "
-      "barrel_distortion=%.3f output_decimation=%d",
+      "barrel_distortion=%.3f hold_frames=%d output_decimation=%d",
       enabled_ ? "true" : "false",
       passthrough_when_no_region_ ? "true" : "false",
       min_region_size_,
       thermal_barrel_distortion_,
+      crop_hold_frames_,
       output_decimation_);
   }
 
@@ -349,6 +355,8 @@ private:
         highlight_max_delta_from_frame_high_ = std::max(0.0, parameter.as_double());
       } else if (name == "passthrough_when_no_region") {
         passthrough_when_no_region_ = parameter.as_bool();
+      } else if (name == "crop_hold_frames") {
+        crop_hold_frames_ = static_cast<int>(std::max<int64_t>(0, parameter.as_int()));
       } else if (name == "output_decimation") {
         output_decimation_ = static_cast<int>(std::clamp<int64_t>(parameter.as_int(), 1, 8));
       } else if (name == "depth_fov_horizontal") {
@@ -390,7 +398,7 @@ private:
       }
     }
     if (geometry_changed) {
-      thermal_to_depth_pixels_.clear();
+      depth_to_thermal_pixel_.clear();
     }
     rcl_interfaces::msg::SetParametersResult result;
     result.successful = true;
@@ -401,6 +409,7 @@ private:
   {
     if (!enabled_) {
       have_crop_ = false;
+      missed_detection_frames_ = 0;
       latest_thermal_mask_.clear();
       if (passthrough_when_no_region_) {
         thermal_pub_->publish(image);
@@ -415,13 +424,23 @@ private:
     if (detected) {
       latest_crop_ = detected_crop;
       have_crop_ = true;
+      missed_detection_frames_ = 0;
+      thermal_pub_->publish(mask_image_by_pixel_mask(image, latest_thermal_mask_));
+    } else if (
+      have_crop_ &&
+      (missed_detection_frames_ < crop_hold_frames_ || !passthrough_when_no_region_))
+    {
+      // Thermal thresholding is noisy around its boundary. Preserve the last
+      // good component for a few misses instead of alternating the depth topic
+      // between a tight ROI and a full-frame fallback.
+      missed_detection_frames_ = std::min(
+        missed_detection_frames_ + 1, std::max(1, crop_hold_frames_));
+      latest_thermal_mask_ = previous_mask;
       thermal_pub_->publish(mask_image_by_pixel_mask(image, latest_thermal_mask_));
     } else if (passthrough_when_no_region_) {
       have_crop_ = false;
+      missed_detection_frames_ = 0;
       thermal_pub_->publish(image);
-    } else if (have_crop_) {
-      latest_thermal_mask_ = previous_mask;
-      thermal_pub_->publish(mask_image_by_pixel_mask(image, latest_thermal_mask_));
     }
   }
 
@@ -522,72 +541,84 @@ private:
       return {};
     }
 
-    const int unit = std::clamp(crop_unit_thermal_pixels_, 1, std::max(width, height));
-    const int columns = static_cast<int>(std::ceil(static_cast<double>(width) / unit));
-    const int rows = static_cast<int>(std::ceil(static_cast<double>(height) / unit));
-    std::vector<uint8_t> mask(static_cast<size_t>(columns * rows), 0);
+    // Threshold at native thermal resolution first. The old implementation
+    // promoted an entire analysis cell when just one pixel was hot, which made
+    // the selected region much larger than the actual target. Cells now exist
+    // only for connected-component analysis; the final mask retains the real
+    // highlighted pixels.
+    std::vector<uint8_t> highlighted_pixels(static_cast<size_t>(width * height), 0);
     int highlighted_count = 0;
+    for (int index = 0; index < width * height; ++index) {
+      if (is_highlighted(values[static_cast<size_t>(index)], low, high)) {
+        highlighted_pixels[static_cast<size_t>(index)] = 1;
+        ++highlighted_count;
+      }
+    }
+    if (highlighted_count == 0) {
+      return {};
+    }
 
-    for (int cell_y = 0; cell_y < rows; ++cell_y) {
-      for (int cell_x = 0; cell_x < columns; ++cell_x) {
-        bool highlighted = false;
-        for (int y = cell_y * unit; y < std::min(height, (cell_y + 1) * unit) && !highlighted; ++y) {
-          for (int x = cell_x * unit; x < std::min(width, (cell_x + 1) * unit); ++x) {
-            const auto value = values[static_cast<size_t>(y * width + x)];
-            if (is_highlighted(value, low, high)) {
-              highlighted = true;
-              break;
-            }
-          }
-        }
-        if (highlighted) {
-          mask[static_cast<size_t>(cell_y * columns + cell_x)] = 1;
-          ++highlighted_count;
+    const int unit = std::clamp(crop_unit_thermal_pixels_, 1, std::max(width, height));
+    const int columns = (width + unit - 1) / unit;
+    const int rows = (height + unit - 1) / unit;
+    std::vector<int> cell_hot_counts(static_cast<size_t>(columns * rows), 0);
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        if (highlighted_pixels[static_cast<size_t>(y * width + x)]) {
+          ++cell_hot_counts[static_cast<size_t>((y / unit) * columns + (x / unit))];
         }
       }
     }
 
-    std::vector<uint8_t> visited(mask.size(), 0);
+    // Find 8-connected components. Prefer the component covering the most
+    // analysis cells, then the one containing more genuinely hot pixels. A
+    // vector with a moving head is a compact queue and avoids per-component
+    // queue-object allocations.
+    std::vector<uint8_t> visited(cell_hot_counts.size(), 0);
     std::vector<int> best_cells;
     int best_cluster_size = 0;
-    for (int index = 0; index < static_cast<int>(mask.size()); ++index) {
-      if (!mask[static_cast<size_t>(index)] || visited[static_cast<size_t>(index)]) {
+    int best_hot_count = 0;
+    for (int start = 0; start < static_cast<int>(cell_hot_counts.size()); ++start) {
+      if (cell_hot_counts[static_cast<size_t>(start)] == 0 || visited[start]) {
         continue;
       }
-      std::queue<int> queue;
+
       std::vector<int> cells;
-      queue.push(index);
-      visited[static_cast<size_t>(index)] = 1;
-
-      while (!queue.empty()) {
-        const int current = queue.front();
-        queue.pop();
-        cells.push_back(current);
-        const int x = current % columns;
-        const int y = current / columns;
-
+      cells.push_back(start);
+      visited[static_cast<size_t>(start)] = 1;
+      int component_hot_count = 0;
+      for (size_t head = 0; head < cells.size(); ++head) {
+        const int current = cells[head];
+        component_hot_count += cell_hot_counts[static_cast<size_t>(current)];
+        const int cell_x = current % columns;
+        const int cell_y = current / columns;
         for (int dy = -1; dy <= 1; ++dy) {
           for (int dx = -1; dx <= 1; ++dx) {
             if (dx == 0 && dy == 0) {
               continue;
             }
-            const int nx = x + dx;
-            const int ny = y + dy;
-            if (nx < 0 || nx >= columns || ny < 0 || ny >= rows) {
+            const int next_x = cell_x + dx;
+            const int next_y = cell_y + dy;
+            if (next_x < 0 || next_x >= columns || next_y < 0 || next_y >= rows) {
               continue;
             }
-            const int next = ny * columns + nx;
-            if (!mask[static_cast<size_t>(next)] || visited[static_cast<size_t>(next)]) {
+            const int next = next_y * columns + next_x;
+            if (cell_hot_counts[static_cast<size_t>(next)] == 0 || visited[next]) {
               continue;
             }
             visited[static_cast<size_t>(next)] = 1;
-            queue.push(next);
+            cells.push_back(next);
           }
         }
       }
 
-      if (static_cast<int>(cells.size()) > best_cluster_size) {
-        best_cluster_size = static_cast<int>(cells.size());
+      const int cluster_size = static_cast<int>(cells.size());
+      if (
+        cluster_size > best_cluster_size ||
+        (cluster_size == best_cluster_size && component_hot_count > best_hot_count))
+      {
+        best_cluster_size = cluster_size;
+        best_hot_count = component_hot_count;
         best_cells = std::move(cells);
       }
     }
@@ -596,29 +627,32 @@ private:
       return {};
     }
 
+    std::vector<uint8_t> winning_cells(cell_hot_counts.size(), 0);
+    for (const int cell : best_cells) {
+      winning_cells[static_cast<size_t>(cell)] = 1;
+    }
+
     latest_thermal_mask_.assign(static_cast<size_t>(width * height), 0);
     const int inflate = std::max(0, inflation_radius_thermal_pixels_);
     const int inflate_squared = inflate * inflate;
-    for (const int cell : best_cells) {
-      const int cell_x = cell % columns;
-      const int cell_y = cell / columns;
-      const int source_left = cell_x * unit;
-      const int source_top = cell_y * unit;
-      const int source_right = std::min(width, (cell_x + 1) * unit);
-      const int source_bottom = std::min(height, (cell_y + 1) * unit);
-
-      for (int source_y = source_top; source_y < source_bottom; ++source_y) {
-        for (int source_x = source_left; source_x < source_right; ++source_x) {
-          for (int dy = -inflate; dy <= inflate; ++dy) {
-            for (int dx = -inflate; dx <= inflate; ++dx) {
-              if (dx * dx + dy * dy > inflate_squared) {
-                continue;
-              }
-              const int x = source_x + dx;
-              const int y = source_y + dy;
-              if (x < 0 || x >= width || y < 0 || y >= height) {
-                continue;
-              }
+    for (int source_y = 0; source_y < height; ++source_y) {
+      for (int source_x = 0; source_x < width; ++source_x) {
+        const int source_index = source_y * width + source_x;
+        const int cell = (source_y / unit) * columns + (source_x / unit);
+        if (
+          !highlighted_pixels[static_cast<size_t>(source_index)] ||
+          !winning_cells[static_cast<size_t>(cell)])
+        {
+          continue;
+        }
+        for (int dy = -inflate; dy <= inflate; ++dy) {
+          for (int dx = -inflate; dx <= inflate; ++dx) {
+            if (dx * dx + dy * dy > inflate_squared) {
+              continue;
+            }
+            const int x = source_x + dx;
+            const int y = source_y + dy;
+            if (x >= 0 && x < width && y >= 0 && y < height) {
               latest_thermal_mask_[static_cast<size_t>(y * width + x)] = 1;
             }
           }
@@ -652,7 +686,7 @@ private:
       right - left + 1,
       bottom - top + 1,
       best_cluster_size,
-      highlighted_count};
+      best_hot_count};
   }
 
   bool is_highlighted(float value, float low, float high) const
@@ -689,24 +723,26 @@ private:
     {
       return black_image_like(image);
     }
-    ensure_thermal_to_depth_lookup(depth_width, depth_height, thermal_width, thermal_height);
+    ensure_depth_to_thermal_lookup(depth_width, depth_height, thermal_width, thermal_height);
 
-    std::vector<int> selected_depth_pixels;
     int selected_left = depth_width;
     int selected_top = depth_height;
     int selected_right = -1;
     int selected_bottom = -1;
-    for (int thermal_pixel = 0; thermal_pixel < thermal_width * thermal_height; ++thermal_pixel) {
-      if (!latest_thermal_mask_[static_cast<size_t>(thermal_pixel)]) {
-        continue;
-      }
-      for (const int depth_pixel : thermal_to_depth_pixels_[static_cast<size_t>(thermal_pixel)]) {
-        const int y = depth_pixel / depth_width;
-        const int x = depth_pixel % depth_width;
+    for (int y = 0; y < depth_height; ++y) {
+      for (int x = 0; x < depth_width; ++x) {
+        const int depth_pixel = y * depth_width + x;
+        const int32_t thermal_pixel =
+          depth_to_thermal_pixel_[static_cast<size_t>(depth_pixel)];
+        if (
+          thermal_pixel < 0 ||
+          !latest_thermal_mask_[static_cast<size_t>(thermal_pixel)])
+        {
+          continue;
+        }
         const auto source_offset =
           static_cast<size_t>(y) * image.step + static_cast<size_t>(x) * bpp;
         if (source_offset + static_cast<size_t>(bpp) <= image.data.size()) {
-          selected_depth_pixels.push_back(depth_pixel);
           selected_left = std::min(selected_left, x);
           selected_top = std::min(selected_top, y);
           selected_right = std::max(selected_right, x);
@@ -723,22 +759,22 @@ private:
         latest_crop_.cluster_size,
         latest_crop_.highlighted_count};
       return crop_and_decimate_image(
-        image, roi, output_decimation_, &selected_depth_pixels);
+        image, roi, output_decimation_, &depth_to_thermal_pixel_, &latest_thermal_mask_);
     }
     return black_image_like(image);
   }
 
-  void ensure_thermal_to_depth_lookup(
+  void ensure_depth_to_thermal_lookup(
     int depth_width,
     int depth_height,
     int thermal_width,
     int thermal_height)
   {
-    const auto thermal_pixels = static_cast<size_t>(thermal_width * thermal_height);
+    const auto depth_pixels = static_cast<size_t>(depth_width) * depth_height;
     if (
       cached_depth_width_ == depth_width && cached_depth_height_ == depth_height &&
       cached_thermal_width_ == thermal_width && cached_thermal_height_ == thermal_height &&
-      thermal_to_depth_pixels_.size() == thermal_pixels)
+      depth_to_thermal_pixel_.size() == depth_pixels)
     {
       return;
     }
@@ -758,14 +794,10 @@ private:
     const double inverse_window_width = 1.0 / std::max(1, window_width);
     const double inverse_window_height = 1.0 / std::max(1, window_height);
 
-    thermal_to_depth_pixels_.assign(thermal_pixels, {});
-    const auto depth_pixel_count =
-      static_cast<size_t>(depth_width) * static_cast<size_t>(depth_height);
-    const auto average_depth_pixels =
-      (depth_pixel_count + thermal_pixels - 1) / thermal_pixels;
-    for (auto & depth_pixels : thermal_to_depth_pixels_) {
-      depth_pixels.reserve(average_depth_pixels);
-    }
+    // A flat forward map is cache-friendly and has exactly one allocation.
+    // The former reverse map used one vector per thermal pixel and required a
+    // large temporary list of selected depth pixels on every frame.
+    depth_to_thermal_pixel_.assign(depth_pixels, -1);
     for (int y = 0; y < depth_height; ++y) {
       const double destination_y = (y - window_top) * inverse_window_height;
       for (int x = 0; x < depth_width; ++x) {
@@ -792,8 +824,7 @@ private:
         const int thermal_x = flip_thermal_x_ ? thermal_width - 1 - display_x : display_x;
         const int thermal_y = flip_thermal_y_ ? thermal_height - 1 - display_y : display_y;
         const int thermal_pixel = thermal_y * thermal_width + thermal_x;
-        thermal_to_depth_pixels_[static_cast<size_t>(thermal_pixel)].push_back(
-          y * depth_width + x);
+        depth_to_thermal_pixel_[static_cast<size_t>(y * depth_width + x)] = thermal_pixel;
       }
     }
     cached_depth_width_ = depth_width;
@@ -839,18 +870,20 @@ private:
   bool flip_thermal_y_ = false;
   bool passthrough_when_no_region_ = true;
   bool enabled_ = true;
+  int crop_hold_frames_ = 3;
   int output_decimation_ = 2;
 
   CropRegion latest_crop_;
   std::vector<uint8_t> latest_thermal_mask_;
   bool have_crop_ = false;
+  int missed_detection_frames_ = 0;
   int latest_thermal_width_ = 32;
   int latest_thermal_height_ = 24;
   int cached_depth_width_ = 0;
   int cached_depth_height_ = 0;
   int cached_thermal_width_ = 0;
   int cached_thermal_height_ = 0;
-  std::vector<std::vector<int>> thermal_to_depth_pixels_;
+  std::vector<int32_t> depth_to_thermal_pixel_;
   sensor_msgs::msg::CameraInfo latest_camera_info_;
   bool have_camera_info_ = false;
 
