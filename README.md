@@ -6,7 +6,7 @@ This workspace is split into top-level control, localization, and sensor package
 - `src/sensors/mi0802_senxor_driver`: C++ ROS 2 driver for a Meridian Innovation MI0802 SenXor over USB CDC ACM.
 - `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
 - `src/sensors/mpu6050_node`: C++ ROS 2 driver for an MPU6050 accelerometer/gyroscope over Linux I2C.
-- `src/localization/vio_node`: sparse monocular visual-inertial odometry publishing `/vio/odometry` and `odom -> base_link`.
+- `src/localization/odom_node`: gyro odometry publishing `/odom` and `odom -> base_link`.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
@@ -53,7 +53,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The camera, IMU, VIO, cropper, and rosbridge start concurrently. The MI0802 process waits only for the first depth topic before starting.
+The frontend performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The top-level graph can start the camera, IMU, odometry, cropper, and rosbridge concurrently. The MI0802 process waits only for the first depth topic before starting.
 
 To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defaults to `/dev/i2c-1`, address `0x68`, publishes raw IMU samples on `/imu/data_raw`, and publishes the chip temperature on `/imu/temperature`:
 
@@ -61,33 +61,22 @@ To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defa
 ros2 launch drone_control drone_launch.py start_imu:=true
 ```
 
-To start visual-inertial odometry, enable the camera and VIO. `start_vio:=true` enables the
-Orbbec RGB stream and MPU6050 by default. Keep the drone stationary while startup alignment
-collects 1000 IMU samples and estimates gravity and sensor biases:
+To start gyro odometry, pass `start_odom:=true`; this also starts the MPU6050 by default. No
+camera stream is required. Keep the drone stationary while startup calibration collects 1000
+gyro samples and estimates angular-rate bias:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
-  start_depth_camera:=true start_vio:=true
-ros2 topic echo /vio/odometry
+  start_odom:=true
+ros2 topic echo /odom
 ```
 
-The VIO defaults consume `/camera/color/image_raw`, `/camera/color/camera_info`, and
-`/imu/data_raw`. It latches completion on `/vio/calibrated` and publishes bias-corrected gyro
-values plus current-attitude gravity-compensated acceleration on `/imu/data_calibrated`.
-Stationary values are approximately zero at any orientation. `/vio/visual_tracking` reports
-whether the most recently processed camera frame produced an accepted visual update. Mount
-rotations, feature tracking, fusion weights, and covariance values are
-configured in `src/localization/vio_node/config/params.yaml`. Replace the default mount
-rotations with measured values before flight. See the package README for estimator limitations.
-
-The Orbbec RGB stream defaults to 5 FPS to match VIO processing and reduce camera and transport load. The lightweight
-`/vio/video_working` heartbeat reports whether VIO is receiving decodable RGB frames with valid
-camera intrinsics, even while a stationary scene produces no visual motion update.
-
-For stationary bench testing only, launch with `vio_static_override:=true` to skip alignment and
-visual fusion and publish a fixed zero-motion estimate. The orientation remains a valid identity
-quaternion. The fixed pose is reported as calibrated for visualization clients, while visual
-tracking remains disabled. Disable the override and restart before the robot can move.
+The node consumes only `/imu/data_raw`. It latches completion on `/odom/calibrated` and publishes
+bias-corrected gyro values plus the integrated relative orientation on `/imu/data_calibrated`.
+Translation stays unobserved, with large covariance, until flow sensors are added. Parameters are
+configured in `src/localization/odom_node/config/params.yaml`; replace the default IMU mount
+rotation with the measured value before flight. Gyro-only orientation has no absolute heading or
+gravity reference and will drift over time. See the package README for estimator limitations.
 
 The thermal cropper publishes the tight selected depth ROI rather than a full-size image padded
 with zeros. Its output uses latest-only ROS QoS and defaults to `depth_output_decimation:=2`, which

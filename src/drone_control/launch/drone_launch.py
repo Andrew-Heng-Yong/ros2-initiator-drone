@@ -22,16 +22,15 @@ def generate_launch_description():
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     mpu6050_share = get_package_share_directory('mpu6050_node')
     mpu6050_params = os.path.join(mpu6050_share, 'config', 'params.yaml')
-    vio_share = get_package_share_directory('vio_node')
-    vio_params = os.path.join(vio_share, 'config', 'params.yaml')
+    odom_share = get_package_share_directory('odom_node')
+    odom_params = os.path.join(odom_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
     start_imu = LaunchConfiguration('start_imu')
-    start_vio = LaunchConfiguration('start_vio')
+    start_odom = LaunchConfiguration('start_odom')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
     color_fps = LaunchConfiguration('color_fps')
     depth_fps = LaunchConfiguration('depth_fps')
-    vio_static_override = LaunchConfiguration('vio_static_override')
     start_thermal_overlay = LaunchConfiguration('start_thermal_overlay')
     start_thermal_cropper = LaunchConfiguration('start_thermal_cropper')
     thermal_device = LaunchConfiguration('thermal_device')
@@ -153,34 +152,29 @@ def generate_launch_description():
             description='Start the Orbbec depth camera driver.',
         ),
         DeclareLaunchArgument(
-            'start_vio',
+            'start_odom',
             default_value='false',
-            description='Start VIO and enable its IMU/RGB inputs by default.',
+            description='Start gyro odometry and its IMU input.',
         ),
         DeclareLaunchArgument(
             'start_imu',
-            default_value=start_vio,
-            description='Start the MPU6050 IMU driver (defaults to start_vio).',
+            default_value=start_odom,
+            description='Start the MPU6050 IMU driver (defaults to start_odom).',
         ),
         DeclareLaunchArgument(
             'enable_color_camera',
-            default_value=start_vio,
-            description='Enable Orbbec RGB on /camera/color/image_raw (defaults to start_vio).',
+            default_value='false',
+            description='Enable Orbbec RGB on /camera/color/image_raw.',
         ),
         DeclareLaunchArgument(
             'color_fps',
             default_value='5',
-            description='Orbbec RGB stream frame rate used by VIO.',
+            description='Orbbec RGB stream frame rate.',
         ),
         DeclareLaunchArgument(
             'depth_fps',
             default_value='5',
             description='Orbbec depth frame rate; the phone stream is cropped and decimated later.',
-        ),
-        DeclareLaunchArgument(
-            'vio_static_override',
-            default_value='false',
-            description='Skip VIO alignment and publish a fixed zero-motion estimate.',
         ),
         DeclareLaunchArgument(
             'start_thermal_overlay',
@@ -325,14 +319,12 @@ def generate_launch_description():
             parameters=[mpu6050_params],
         ),
         Node(
-            package='vio_node',
-            executable='vio_node',
-            name='vio_node',
+            package='odom_node',
+            executable='odom_node',
+            name='odom_node',
             output='screen',
-            condition=IfCondition(start_vio),
-            parameters=[vio_params, {
-                'static_override': ParameterValue(vio_static_override, value_type=bool),
-            }],
+            condition=IfCondition(start_odom),
+            parameters=[odom_params],
         ),
         Node(
             package='rosbridge_server',

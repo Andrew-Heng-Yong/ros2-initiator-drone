@@ -8,19 +8,19 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    package_share = get_package_share_directory('vio_node')
+    package_share = get_package_share_directory('odom_node')
     default_params = os.path.join(package_share, 'config', 'params.yaml')
 
     return LaunchDescription([
         DeclareLaunchArgument(
             'params_file',
             default_value=default_params,
-            description='VIO parameter YAML file.',
+            description='Odometry parameter YAML file.',
         ),
         Node(
-            package='vio_node',
-            executable='vio_node',
-            name='vio_node',
+            package='odom_node',
+            executable='odom_node',
+            name='odom_node',
             output='screen',
             parameters=[LaunchConfiguration('params_file')],
         ),

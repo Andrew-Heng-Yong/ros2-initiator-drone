@@ -1,0 +1,27 @@
+odom_node:
+  ros__parameters:
+    imu_topic: /imu/data_raw
+    calibrated_imu_topic: /imu/data_calibrated
+    odom_topic: /odom
+    calibration_status_topic: /odom/calibrated
+    calibration_service: /odom/calibrate
+
+    odom_frame: odom
+    base_frame: base_link
+    publish_tf: true
+
+    gyro_deadband_rad_s: 0.005
+    calibrate_on_startup: true
+    startup_initialization_samples: 1000
+    initialization_samples: 200
+    max_calibration_angular_speed_rad_s: 0.10
+    max_calibration_gyro_stddev_rad_s: 0.03
+    max_imu_gap_sec: 0.25
+
+    # Rotation from the mounted IMU frame into base_link.
+    imu_to_body_rotation_rpy: [0.0, 0.0, 0.0]
+
+    # Translation is intentionally unobserved until flow sensors are added.
+    unobserved_position_variance: 1000000.0
+    initial_orientation_variance: 0.01
+    angular_velocity_variance: 0.02

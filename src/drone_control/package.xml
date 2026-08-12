@@ -13,6 +13,6 @@
   <exec_depend>mlx90640_node</exec_depend>
   <exec_depend>mpu6050_node</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
-  <exec_depend>vio_node</exec_depend>
+  <exec_depend>odom_node</exec_depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>
