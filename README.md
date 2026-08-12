@@ -53,7 +53,7 @@ Launch with rosbridge for the frontend:
 ros2 launch drone_control drone_launch.py start_rosbridge:=true
 ```
 
-The frontend starts the Orbbec depth camera at 640x480 10 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The camera, IMU, VIO, cropper, and rosbridge start concurrently. The MI0802 process waits only for the first depth topic before starting.
+The frontend starts the Orbbec depth camera at 640x480 5 fps and performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The camera, IMU, VIO, cropper, and rosbridge start concurrently. The MI0802 process waits only for the first depth topic before starting.
 
 To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defaults to `/dev/i2c-1`, address `0x68`, publishes raw IMU samples on `/imu/data_raw`, and publishes the chip temperature on `/imu/temperature`:
 
@@ -93,9 +93,8 @@ The thermal cropper publishes the tight selected depth ROI rather than a full-si
 with zeros. Its output uses latest-only ROS QoS and defaults to `depth_output_decimation:=2`, which
 keeps every second pixel in each axis and reduces the rosbridge depth payload by a further 4x.
 CameraInfo dimensions and intrinsics are adjusted to match, so point-cloud geometry remains valid.
-The depth camera defaults to its supported 10 fps profile while RGB remains at VIO's 5 fps. Use
-`depth_output_decimation:=1` when full cropped resolution is required, or `depth_fps:=5` when the
-robot is connected through a slower USB or Wi-Fi path.
+The depth camera remains on the project's verified 5 fps profile. Use
+`depth_output_decimation:=1` when full cropped resolution is required.
 
 To start the Orbbec camera alongside the thermal node for browser-side overlay,
 pass the camera flag:

@@ -174,7 +174,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'depth_fps',
-            default_value='10',
+            default_value='5',
             description='Orbbec depth frame rate; the phone stream is cropped and decimated later.',
         ),
         DeclareLaunchArgument(
