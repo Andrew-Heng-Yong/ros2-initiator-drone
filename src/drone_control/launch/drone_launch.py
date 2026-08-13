@@ -28,6 +28,7 @@ def generate_launch_description():
     start_depth_camera = LaunchConfiguration('start_depth_camera')
     start_imu = LaunchConfiguration('start_imu')
     start_odom = LaunchConfiguration('start_odom')
+    odom_static_override = LaunchConfiguration('odom_static_override')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
     color_fps = LaunchConfiguration('color_fps')
     depth_fps = LaunchConfiguration('depth_fps')
@@ -160,6 +161,11 @@ def generate_launch_description():
             'start_imu',
             default_value=start_odom,
             description='Start the MPU6050 IMU driver (defaults to start_odom).',
+        ),
+        DeclareLaunchArgument(
+            'odom_static_override',
+            default_value='false',
+            description='Publish fixed calibrated odometry for stationary bench testing.',
         ),
         DeclareLaunchArgument(
             'enable_color_camera',
@@ -324,7 +330,9 @@ def generate_launch_description():
             name='odom_node',
             output='screen',
             condition=IfCondition(start_odom),
-            parameters=[odom_params],
+            parameters=[odom_params, {
+                'static_override': ParameterValue(odom_static_override, value_type=bool),
+            }],
         ),
         Node(
             package='rosbridge_server',

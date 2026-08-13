@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -101,6 +102,7 @@ public:
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
+    static_override_ = declare_parameter<bool>("static_override", false);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -119,6 +121,8 @@ public:
 
     unobserved_position_variance_ =
       declare_parameter<double>("unobserved_position_variance", 1.0e6);
+    static_position_variance_ =
+      declare_parameter<double>("static_position_variance", 0.01);
     initial_orientation_variance_ =
       declare_parameter<double>("initial_orientation_variance", 0.01);
     angular_velocity_variance_ =
@@ -132,6 +136,8 @@ public:
       calibrated_imu_topic_, rclcpp::SensorDataQoS());
     calibration_status_publisher_ = create_publisher<std_msgs::msg::Bool>(
       calibration_status_topic_, rclcpp::QoS(1).reliable().transient_local());
+    calibration_status_timer_ = create_wall_timer(
+      std::chrono::seconds(1), [this]() {publish_current_calibration_status();});
     if (publish_tf_) {
       transform_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     }
@@ -148,7 +154,14 @@ public:
         start_calibration(response);
       });
 
-    if (calibrate_on_startup_) {
+    if (static_override_) {
+      initialized_ = true;
+      publish_calibration_status(true);
+      RCLCPP_WARN(
+        get_logger(),
+        "Odometry static override active: calibration and gyro integration are disabled; "
+        "publishing a fixed calibrated pose at the origin");
+    } else if (calibrate_on_startup_) {
       reset_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
         get_logger(),
@@ -175,7 +188,8 @@ private:
     if (gyro_deadband_rad_s_ < 0.0 || initialization_samples_ < 10 ||
       startup_initialization_samples_ < 10 || max_calibration_angular_speed_rad_s_ <= 0.0 ||
       max_calibration_gyro_stddev_rad_s_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
-      unobserved_position_variance_ <= 0.0 || initial_orientation_variance_ < 0.0 ||
+      unobserved_position_variance_ <= 0.0 || static_position_variance_ < 0.0 ||
+      initial_orientation_variance_ < 0.0 ||
       angular_velocity_variance_ < 0.0)
     {
       throw std::invalid_argument("invalid gyro odometry parameters");
@@ -184,6 +198,12 @@ private:
 
   void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr & message)
   {
+    if (static_override_) {
+      publish_outputs(
+        rclcpp::Time(message->header.stamp), tf2::Vector3(0.0, 0.0, 0.0), true);
+      return;
+    }
+
     const tf2::Vector3 raw_gyro = tf2::quatRotate(
       imu_to_body_, tf2::Vector3(
         message->angular_velocity.x,
@@ -241,6 +261,11 @@ private:
 
   void start_calibration(const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
+    if (static_override_) {
+      response->success = false;
+      response->message = "calibration is disabled while the odometry static override is active";
+      return;
+    }
     reset_for_calibration(initialization_samples_);
     response->success = true;
     response->message = "gyro calibration started; keep the drone stationary";
@@ -319,12 +344,20 @@ private:
 
   void publish_calibration_status(bool calibrated)
   {
+    calibrated_ = calibrated;
+    publish_current_calibration_status();
+  }
+
+  void publish_current_calibration_status()
+  {
     std_msgs::msg::Bool message;
-    message.data = calibrated;
+    message.data = calibrated_;
     calibration_status_publisher_->publish(message);
   }
 
-  void publish_outputs(const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity)
+  void publish_outputs(
+    const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity,
+    bool static_pose = false)
   {
     sensor_msgs::msg::Imu imu;
     imu.header.stamp = stamp;
@@ -348,17 +381,20 @@ private:
     odometry.pose.pose.orientation = quaternion_message(orientation_);
     odometry.twist.twist.angular = vector_message(angular_velocity);
 
-    // Position and linear velocity stay at zero as placeholders, with large covariance to make
-    // clear that they are unobserved until a flow-sensor measurement source is added.
-    odometry.pose.covariance[0] = unobserved_position_variance_;
-    odometry.pose.covariance[7] = unobserved_position_variance_;
-    odometry.pose.covariance[14] = unobserved_position_variance_;
+    // In normal gyro-only mode, zero translation is an unobserved placeholder. Static override is
+    // an explicit promise that the robot is fixed at the origin, so advertise its configured low
+    // variance and allow visualization clients to treat the complete pose as tracked.
+    const double position_variance =
+      static_pose ? static_position_variance_ : unobserved_position_variance_;
+    odometry.pose.covariance[0] = position_variance;
+    odometry.pose.covariance[7] = position_variance;
+    odometry.pose.covariance[14] = position_variance;
     odometry.pose.covariance[21] = orientation_variance_;
     odometry.pose.covariance[28] = orientation_variance_;
     odometry.pose.covariance[35] = orientation_variance_;
-    odometry.twist.covariance[0] = unobserved_position_variance_;
-    odometry.twist.covariance[7] = unobserved_position_variance_;
-    odometry.twist.covariance[14] = unobserved_position_variance_;
+    odometry.twist.covariance[0] = position_variance;
+    odometry.twist.covariance[7] = position_variance;
+    odometry.twist.covariance[14] = position_variance;
     odometry.twist.covariance[21] = angular_velocity_variance_;
     odometry.twist.covariance[28] = angular_velocity_variance_;
     odometry.twist.covariance[35] = angular_velocity_variance_;
@@ -382,7 +418,9 @@ private:
   std::string base_frame_;
 
   bool publish_tf_ = true;
+  bool static_override_ = false;
   bool calibrate_on_startup_ = true;
+  bool calibrated_ = false;
   bool initialized_ = false;
   bool has_previous_sample_ = false;
   int initialization_samples_ = 200;
@@ -394,6 +432,7 @@ private:
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
   double max_imu_gap_sec_ = 0.25;
   double unobserved_position_variance_ = 1.0e6;
+  double static_position_variance_ = 0.01;
   double initial_orientation_variance_ = 0.01;
   double orientation_variance_ = 0.01;
   double angular_velocity_variance_ = 0.02;
@@ -409,6 +448,7 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr calibrated_imu_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_publisher_;
+  rclcpp::TimerBase::SharedPtr calibration_status_timer_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> transform_broadcaster_;

@@ -71,12 +71,22 @@ ros2 launch drone_control drone_launch.py \
 ros2 topic echo /odom
 ```
 
-The node consumes only `/imu/data_raw`. It latches completion on `/odom/calibrated` and publishes
+The node consumes only `/imu/data_raw`. It publishes completion on `/odom/calibrated` once per
+second (with transient-local durability for native ROS subscribers) and publishes
 bias-corrected gyro values plus the integrated relative orientation on `/imu/data_calibrated`.
 Translation stays unobserved, with large covariance, until flow sensors are added. Parameters are
 configured in `src/localization/odom_node/config/params.yaml`; replace the default IMU mount
 rotation with the measured value before flight. Gyro-only orientation has no absolute heading or
 gravity reference and will drift over time. See the package README for estimator limitations.
+
+For a stationary bench setup, `odom_static_override:=true` bypasses calibration and publishes a
+fixed, calibrated origin pose with observed position covariance. This makes visualization clients
+such as the iPhone app report a complete tracked pose. Disable the override before the robot moves:
+
+```bash
+ros2 launch drone_control drone_launch.py \
+  start_odom:=true odom_static_override:=true
+```
 
 The thermal cropper publishes the tight selected depth ROI rather than a full-size image padded
 with zeros. Its output uses latest-only ROS QoS and defaults to `depth_output_decimation:=2`, which

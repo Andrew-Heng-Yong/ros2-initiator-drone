@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -17,11 +18,19 @@ def generate_launch_description():
             default_value=default_params,
             description='Odometry parameter YAML file.',
         ),
+        DeclareLaunchArgument(
+            'static_override',
+            default_value='false',
+            description='Publish a fixed calibrated origin pose for stationary bench testing.',
+        ),
         Node(
             package='odom_node',
             executable='odom_node',
             name='odom_node',
             output='screen',
-            parameters=[LaunchConfiguration('params_file')],
+            parameters=[LaunchConfiguration('params_file'), {
+                'static_override': ParameterValue(
+                    LaunchConfiguration('static_override'), value_type=bool),
+            }],
         ),
     ])
