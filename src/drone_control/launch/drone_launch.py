@@ -29,6 +29,7 @@ def generate_launch_description():
     start_imu = LaunchConfiguration('start_imu')
     start_odom = LaunchConfiguration('start_odom')
     odom_static_override = LaunchConfiguration('odom_static_override')
+    odom_quality_override = LaunchConfiguration('odom_quality_override')
     enable_color_camera = LaunchConfiguration('enable_color_camera')
     color_fps = LaunchConfiguration('color_fps')
     depth_fps = LaunchConfiguration('depth_fps')
@@ -166,6 +167,11 @@ def generate_launch_description():
             'odom_static_override',
             default_value='false',
             description='Publish fixed calibrated odometry for stationary bench testing.',
+        ),
+        DeclareLaunchArgument(
+            'odom_quality_override',
+            default_value='false',
+            description='Force gyro-only odometry to report position quality as good.',
         ),
         DeclareLaunchArgument(
             'enable_color_camera',
@@ -332,6 +338,7 @@ def generate_launch_description():
             condition=IfCondition(start_odom),
             parameters=[odom_params, {
                 'static_override': ParameterValue(odom_static_override, value_type=bool),
+                'quality_override': ParameterValue(odom_quality_override, value_type=bool),
             }],
         ),
         Node(

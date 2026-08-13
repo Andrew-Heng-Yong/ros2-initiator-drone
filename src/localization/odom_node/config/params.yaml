@@ -12,6 +12,9 @@ odom_node:
     # Bench-only mode: publish a fixed, calibrated origin pose with observed
     # position covariance. Disable before the robot can move.
     static_override: false
+    # Force unobserved gyro-only translation to look position-observed to
+    # consumers such as the iPhone app. This changes reported quality only.
+    quality_override: false
 
     gyro_deadband_rad_s: 0.005
     calibrate_on_startup: true
@@ -28,5 +31,7 @@ odom_node:
     unobserved_position_variance: 1000000.0
     # Translation variance advertised only while static_override is active.
     static_position_variance: 0.01
+    # Translation variance advertised while quality_override is active.
+    quality_override_position_variance: 0.01
     initial_orientation_variance: 0.01
     angular_velocity_variance: 0.02

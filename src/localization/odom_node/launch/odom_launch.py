@@ -23,6 +23,11 @@ def generate_launch_description():
             default_value='false',
             description='Publish a fixed calibrated origin pose for stationary bench testing.',
         ),
+        DeclareLaunchArgument(
+            'quality_override',
+            default_value='false',
+            description='Report gyro-only translation as observed for visualization clients.',
+        ),
         Node(
             package='odom_node',
             executable='odom_node',
@@ -31,6 +36,8 @@ def generate_launch_description():
             parameters=[LaunchConfiguration('params_file'), {
                 'static_override': ParameterValue(
                     LaunchConfiguration('static_override'), value_type=bool),
+                'quality_override': ParameterValue(
+                    LaunchConfiguration('quality_override'), value_type=bool),
             }],
         ),
     ])

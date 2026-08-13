@@ -15,6 +15,12 @@ pose at the `odom` origin with `static_position_variance`. The fixed pose is adv
 calibrated and position-observed, so the iPhone app reports **Robot track: Tracking**. Disable the
 override and restart before the robot can move.
 
+Set `quality_override: true` (or launch with `quality_override:=true`) to keep normal live gyro
+orientation while forcing the unobserved zero translation to use
+`quality_override_position_variance`. This makes covariance-based clients report full tracking
+even though position is still not measured. It changes only the advertised quality, not the
+estimate.
+
 The node rotates gyro samples from the mounted IMU frame into `base_link`, removes the stationary
 bias, applies a small noise deadband, and integrates the midpoint of consecutive angular-rate
 samples. It does not integrate across out-of-order timestamps or gaps longer than
@@ -40,6 +46,13 @@ The equivalent top-level bench launch is:
 ```bash
 ros2 launch drone_control drone_launch.py \
   start_odom:=true odom_static_override:=true
+```
+
+To keep live gyro orientation but force good reported position quality instead:
+
+```bash
+ros2 launch drone_control drone_launch.py \
+  start_odom:=true odom_quality_override:=true
 ```
 
 Keep the drone stationary while the first `startup_initialization_samples` messages arrive. A

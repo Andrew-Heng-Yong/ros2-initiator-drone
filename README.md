@@ -88,6 +88,10 @@ ros2 launch drone_control drone_launch.py \
   start_odom:=true odom_static_override:=true
 ```
 
+`odom_quality_override:=true` is the less invasive visualization override: gyro orientation keeps
+updating, but the node reports its unmeasured zero translation with low covariance so the iPhone
+shows **Tracking**. It does not improve the underlying estimate.
+
 The thermal cropper publishes the tight selected depth ROI rather than a full-size image padded
 with zeros. Its output uses latest-only ROS QoS and defaults to `depth_output_decimation:=2`, which
 keeps every second pixel in each axis and reduces the rosbridge depth payload by a further 4x.

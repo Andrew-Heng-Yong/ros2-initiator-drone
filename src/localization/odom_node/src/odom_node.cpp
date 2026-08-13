@@ -103,6 +103,7 @@ public:
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     static_override_ = declare_parameter<bool>("static_override", false);
+    quality_override_ = declare_parameter<bool>("quality_override", false);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -123,6 +124,8 @@ public:
       declare_parameter<double>("unobserved_position_variance", 1.0e6);
     static_position_variance_ =
       declare_parameter<double>("static_position_variance", 0.01);
+    quality_override_position_variance_ =
+      declare_parameter<double>("quality_override_position_variance", 0.01);
     initial_orientation_variance_ =
       declare_parameter<double>("initial_orientation_variance", 0.01);
     angular_velocity_variance_ =
@@ -174,6 +177,13 @@ public:
         get_logger(),
         "Startup gyro calibration is disabled; using zero bias and identity orientation");
     }
+    if (quality_override_ && !static_override_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Odometry quality override active: unobserved translation will be reported with "
+        "variance %.6f m^2 so consumers treat the pose as tracked",
+        quality_override_position_variance_);
+    }
   }
 
 private:
@@ -189,6 +199,7 @@ private:
       startup_initialization_samples_ < 10 || max_calibration_angular_speed_rad_s_ <= 0.0 ||
       max_calibration_gyro_stddev_rad_s_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
       unobserved_position_variance_ <= 0.0 || static_position_variance_ < 0.0 ||
+      quality_override_position_variance_ < 0.0 ||
       initial_orientation_variance_ < 0.0 ||
       angular_velocity_variance_ < 0.0)
     {
@@ -382,10 +393,11 @@ private:
     odometry.twist.twist.angular = vector_message(angular_velocity);
 
     // In normal gyro-only mode, zero translation is an unobserved placeholder. Static override is
-    // an explicit promise that the robot is fixed at the origin, so advertise its configured low
-    // variance and allow visualization clients to treat the complete pose as tracked.
-    const double position_variance =
-      static_pose ? static_position_variance_ : unobserved_position_variance_;
+    // an explicit promise that the robot is fixed at the origin. Quality override makes no such
+    // promise; it deliberately changes only the reported covariance for visualization clients.
+    const double position_variance = static_pose ? static_position_variance_ :
+      (quality_override_ ? quality_override_position_variance_ :
+      unobserved_position_variance_);
     odometry.pose.covariance[0] = position_variance;
     odometry.pose.covariance[7] = position_variance;
     odometry.pose.covariance[14] = position_variance;
@@ -419,6 +431,7 @@ private:
 
   bool publish_tf_ = true;
   bool static_override_ = false;
+  bool quality_override_ = false;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
@@ -433,6 +446,7 @@ private:
   double max_imu_gap_sec_ = 0.25;
   double unobserved_position_variance_ = 1.0e6;
   double static_position_variance_ = 0.01;
+  double quality_override_position_variance_ = 0.01;
   double initial_orientation_variance_ = 0.01;
   double orientation_variance_ = 0.01;
   double angular_velocity_variance_ = 0.02;
