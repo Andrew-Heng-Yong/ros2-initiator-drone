@@ -55,10 +55,11 @@ ros2 launch drone_control drone_launch.py \
   start_odom:=true odom_quality_override:=true
 ```
 
-Keep the drone stationary while the first `startup_initialization_samples` messages arrive. A
-calibration window is rejected and restarted when its mean angular speed or sample standard
-deviation indicates motion. Calibration state is transient-local on `/odom/calibrated` and is also
-republished once per second so rosbridge clients that connect after startup still receive it.
+Keep the drone stationary while the first `startup_initialization_samples` messages arrive. Sample
+standard deviation is used to reject a window with movement. The mean is learned as the stationary
+zero-rate bias and is accepted up to the generous `max_calibration_angular_speed_rad_s` sensor
+sanity limit. Calibration state is transient-local on `/odom/calibrated` and is also republished
+once per second so rosbridge clients that connect after startup still receive it.
 
 Request recalibration while the drone is stationary:
 

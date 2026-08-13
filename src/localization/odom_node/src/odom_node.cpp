@@ -111,7 +111,7 @@ public:
     startup_initialization_samples_ =
       declare_parameter<int>("startup_initialization_samples", 1000);
     max_calibration_angular_speed_rad_s_ =
-      declare_parameter<double>("max_calibration_angular_speed_rad_s", 0.10);
+      declare_parameter<double>("max_calibration_angular_speed_rad_s", 0.50);
     max_calibration_gyro_stddev_rad_s_ =
       declare_parameter<double>("max_calibration_gyro_stddev_rad_s", 0.03);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
@@ -325,14 +325,26 @@ private:
       std::max(0.0, gyro_squared_sum_.z() / sample_count - mean.z() * mean.z()));
     const double maximum_stddev = std::sqrt(std::max({variance.x(), variance.y(), variance.z()}));
 
-    if (mean.length() > max_calibration_angular_speed_rad_s_ ||
-      maximum_stddev > max_calibration_gyro_stddev_rad_s_)
-    {
+    if (maximum_stddev > max_calibration_gyro_stddev_rad_s_) {
       RCLCPP_WARN(
         get_logger(),
-        "Gyro moved during calibration (mean %.5f rad/s, max stddev %.5f rad/s); "
+        "Gyro moved during calibration (max stddev %.5f rad/s, mean %.5f rad/s); "
         "restarting the stationary sample window",
-        mean.length(), maximum_stddev);
+        maximum_stddev, mean.length());
+      reset_calibration_window();
+      return;
+    }
+
+    // A stationary gyro can have a substantial constant zero-rate offset; that mean is exactly
+    // the bias this window is intended to learn. Keep only a generous sanity cap for a bad sensor
+    // or a calibration attempted during sustained rotation, and use sample variation to detect
+    // ordinary movement.
+    if (mean.length() > max_calibration_angular_speed_rad_s_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Gyro zero-rate bias %.5f rad/s exceeds calibration limit %.5f rad/s "
+        "(max stddev %.5f rad/s); restarting the stationary sample window",
+        mean.length(), max_calibration_angular_speed_rad_s_, maximum_stddev);
       reset_calibration_window();
       return;
     }
@@ -441,7 +453,7 @@ private:
   int active_initialization_samples_ = 1000;
   int initialization_count_ = 0;
   double gyro_deadband_rad_s_ = 0.005;
-  double max_calibration_angular_speed_rad_s_ = 0.10;
+  double max_calibration_angular_speed_rad_s_ = 0.50;
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
   double max_imu_gap_sec_ = 0.25;
   double unobserved_position_variance_ = 1.0e6;

@@ -20,7 +20,9 @@ odom_node:
     calibrate_on_startup: true
     startup_initialization_samples: 1000
     initialization_samples: 200
-    max_calibration_angular_speed_rad_s: 0.10
+    # Sanity cap for the zero-rate bias magnitude. Stationarity is primarily
+    # decided from sample variation so a stable sensor offset can be learned.
+    max_calibration_angular_speed_rad_s: 0.50
     max_calibration_gyro_stddev_rad_s: 0.03
     max_imu_gap_sec: 0.25
 

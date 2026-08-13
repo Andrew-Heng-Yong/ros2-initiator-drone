@@ -63,7 +63,8 @@ ros2 launch drone_control drone_launch.py start_imu:=true
 
 To start gyro odometry, pass `start_odom:=true`; this also starts the MPU6050 by default. No
 camera stream is required. Keep the drone stationary while startup calibration collects 1000
-gyro samples and estimates angular-rate bias:
+gyro samples and estimates angular-rate bias. Stationarity is determined primarily from sample
+variation, allowing a stable zero-rate sensor offset to be learned:
 
 ```bash
 ros2 launch drone_control drone_launch.py \
