@@ -15,12 +15,9 @@ odom_node:
     # Force position confidence low enough for visualization clients regardless
     # of inertial drift. This changes reported quality only.
     quality_override: false
-    # Experimental IMU-only translation. This drives /odom XY for existing
+    # Experimental IMU-only translation. This drives /odom XYZ for existing
     # clients without app changes, but will drift without an external reference.
     integrate_linear_acceleration: true
-    # Ground-robot constraint: prevent gravity error from integrating into
-    # runaway vertical position. Disable only when genuine Z motion is required.
-    planar_translation: true
     # Learn accelerometer gain from stationary gravity. This also handles
     # MPU-compatible boards whose effective range differs from readback.
     auto_scale_acceleration: true
@@ -40,17 +37,9 @@ odom_node:
     # Warning threshold only. Accelerometer noise no longer blocks gyro calibration.
     max_calibration_accel_stddev_m_s2: 0.25
     max_imu_gap_sec: 0.25
-    # Preserve gentle ground-robot acceleration while filtering sensor noise.
+    # Preserve gentle vehicle acceleration while filtering sensor noise.
     acceleration_deadband_m_s2: 0.03
     acceleration_filter_time_constant_sec: 0.08
-    # Detect rest from low temporal variance instead of requiring acceleration
-    # bias to be near zero. The broad bias cap rejects genuine strong motion.
-    stationary_detection_window_size: 50
-    stationary_acceleration_stddev_threshold_m_s2: 0.08
-    stationary_acceleration_max_bias_m_s2: 1.0
-    stationary_gyro_threshold_rad_s: 0.03
-    stationary_hold_sec: 0.50
-    gravity_adaptation_rate: 0.50
     velocity_damping_per_sec: 0.05
     max_linear_acceleration_m_s2: 15.0
     max_linear_speed_m_s: 5.0

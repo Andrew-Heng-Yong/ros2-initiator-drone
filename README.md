@@ -79,11 +79,10 @@ on `/odom/calibrated` once per second (with transient-local durability for nativ
 and applies a ten-read rolling mean to gyro and acceleration before publishing bias-corrected gyro
 values, integrated relative orientation, and diagnostic acceleration on
 `/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
-acceleration into `/odom` velocity and position, with stationary zero-velocity resets. Translation
-is planar by default: it projects motion onto the calibrated gravity plane and locks Z to zero so
-gravity error cannot launch or drop a ground robot. Gentle X/Y acceleration is filtered but no
-longer classified as stationary by the old `0.20 m/s^2` gate. This gives existing clients a motion
-response but is IMU-only dead reckoning and X/Y will drift quickly. Parameters are configured in
+acceleration into three-dimensional `/odom` velocity and position. It does not infer stationarity
+or apply zero-velocity resets from IMU data. Acceleration is lightly filtered before integration.
+This gives existing clients a motion response but is IMU-only dead reckoning and position will
+drift quickly. Parameters are configured in
 `src/localization/odom_node/config/params.yaml`; replace the default IMU mount rotation with the
 measured value before flight. See the package README for estimator limitations.
 
