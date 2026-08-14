@@ -33,10 +33,12 @@ odom_node:
     # Warning threshold only. Accelerometer noise no longer blocks gyro calibration.
     max_calibration_accel_stddev_m_s2: 0.25
     max_imu_gap_sec: 0.25
-    acceleration_deadband_m_s2: 0.10
-    stationary_acceleration_threshold_m_s2: 0.20
+    # Preserve gentle ground-robot acceleration while filtering sensor noise.
+    acceleration_deadband_m_s2: 0.03
+    acceleration_filter_time_constant_sec: 0.08
+    stationary_acceleration_threshold_m_s2: 0.05
     stationary_gyro_threshold_rad_s: 0.03
-    stationary_hold_sec: 0.25
+    stationary_hold_sec: 0.50
     gravity_adaptation_rate: 0.50
     velocity_damping_per_sec: 0.05
     max_linear_acceleration_m_s2: 15.0

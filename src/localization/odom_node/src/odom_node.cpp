@@ -132,12 +132,14 @@ public:
       declare_parameter<double>("max_calibration_accel_stddev_m_s2", 0.25);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
     acceleration_deadband_m_s2_ =
-      declare_parameter<double>("acceleration_deadband_m_s2", 0.10);
+      declare_parameter<double>("acceleration_deadband_m_s2", 0.03);
+    acceleration_filter_time_constant_sec_ =
+      declare_parameter<double>("acceleration_filter_time_constant_sec", 0.08);
     stationary_acceleration_threshold_m_s2_ =
-      declare_parameter<double>("stationary_acceleration_threshold_m_s2", 0.20);
+      declare_parameter<double>("stationary_acceleration_threshold_m_s2", 0.05);
     stationary_gyro_threshold_rad_s_ =
       declare_parameter<double>("stationary_gyro_threshold_rad_s", 0.03);
-    stationary_hold_sec_ = declare_parameter<double>("stationary_hold_sec", 0.25);
+    stationary_hold_sec_ = declare_parameter<double>("stationary_hold_sec", 0.50);
     gravity_adaptation_rate_ = declare_parameter<double>("gravity_adaptation_rate", 0.50);
     velocity_damping_per_sec_ = declare_parameter<double>("velocity_damping_per_sec", 0.05);
     max_linear_acceleration_m_s2_ =
@@ -245,7 +247,8 @@ private:
       startup_initialization_samples_ < 10 || max_calibration_angular_speed_rad_s_ <= 0.0 ||
       max_calibration_gyro_stddev_rad_s_ <= 0.0 ||
       max_calibration_accel_stddev_m_s2_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
-      acceleration_deadband_m_s2_ < 0.0 || stationary_acceleration_threshold_m_s2_ <= 0.0 ||
+      acceleration_deadband_m_s2_ < 0.0 || acceleration_filter_time_constant_sec_ < 0.0 ||
+      stationary_acceleration_threshold_m_s2_ <= 0.0 ||
       stationary_gyro_threshold_rad_s_ <= 0.0 || stationary_hold_sec_ < 0.0 ||
       gravity_adaptation_rate_ < 0.0 || velocity_damping_per_sec_ < 0.0 ||
       max_linear_acceleration_m_s2_ <= 0.0 || max_linear_speed_m_s_ <= 0.0 ||
@@ -326,6 +329,7 @@ private:
       integrate_translation(mounted_acceleration, angular_velocity, dt);
     } else {
       linear_velocity_.setValue(0.0, 0.0, 0.0);
+      filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
       stationary_duration_sec_ = 0.0;
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
@@ -367,7 +371,10 @@ private:
     previous_angular_velocity_.setValue(0.0, 0.0, 0.0);
     position_.setValue(0.0, 0.0, 0.0);
     linear_velocity_.setValue(0.0, 0.0, 0.0);
+    filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
     gravity_odom_.setValue(0.0, 0.0, 0.0);
+    planar_x_axis_.setValue(1.0, 0.0, 0.0);
+    planar_y_axis_.setValue(0.0, 1.0, 0.0);
     stationary_duration_sec_ = 0.0;
     has_gravity_reference_ = false;
     acceleration_integration_available_ = integrate_linear_acceleration_;
@@ -476,6 +483,7 @@ private:
       acceleration_integration_available_ = integrate_linear_acceleration_;
       gravity_odom_ = acceleration_mean;
       has_gravity_reference_ = true;
+      update_planar_basis();
     }
 
     gyro_bias_ = gyro_mean;
@@ -506,6 +514,28 @@ private:
     }
     gravity_odom_ = tf2::quatRotate(orientation_, linear_acceleration);
     has_gravity_reference_ = linear_acceleration.length() > kSmallAngle;
+    if (has_gravity_reference_) {
+      update_planar_basis();
+    }
+  }
+
+  void update_planar_basis()
+  {
+    if (gravity_odom_.length() < kSmallAngle) {
+      planar_x_axis_.setValue(1.0, 0.0, 0.0);
+      planar_y_axis_.setValue(0.0, 1.0, 0.0);
+      return;
+    }
+    const tf2::Vector3 vertical_axis = gravity_odom_.normalized();
+    tf2::Vector3 forward_reference(1.0, 0.0, 0.0);
+    if (std::abs(vertical_axis.dot(forward_reference)) > 0.90) {
+      forward_reference.setValue(0.0, 1.0, 0.0);
+    }
+    planar_x_axis_ = forward_reference -
+      vertical_axis * vertical_axis.dot(forward_reference);
+    planar_x_axis_.normalize();
+    planar_y_axis_ = vertical_axis.cross(planar_x_axis_);
+    planar_y_axis_.normalize();
   }
 
   void integrate_translation(
@@ -526,10 +556,18 @@ private:
       observed_gravity_and_acceleration - gravity_odom_;
     tf2::Vector3 translation_acceleration = gravity_compensated_acceleration;
     if (planar_translation_) {
-      translation_acceleration.setZ(0.0);
+      translation_acceleration.setValue(
+        gravity_compensated_acceleration.dot(planar_x_axis_),
+        gravity_compensated_acceleration.dot(planar_y_axis_), 0.0);
       linear_velocity_.setZ(0.0);
       position_.setZ(0.0);
     }
+    const double acceleration_filter_alpha = acceleration_filter_time_constant_sec_ < kSmallAngle ?
+      1.0 : dt / (acceleration_filter_time_constant_sec_ + dt);
+    filtered_translation_acceleration_ =
+      filtered_translation_acceleration_ * (1.0 - acceleration_filter_alpha) +
+      translation_acceleration * acceleration_filter_alpha;
+    translation_acceleration = filtered_translation_acceleration_;
     const bool stationary_candidate =
       angular_velocity.length() <= stationary_gyro_threshold_rad_s_ &&
       translation_acceleration.length() <= stationary_acceleration_threshold_m_s2_;
@@ -670,10 +708,11 @@ private:
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
   double max_calibration_accel_stddev_m_s2_ = 0.25;
   double max_imu_gap_sec_ = 0.25;
-  double acceleration_deadband_m_s2_ = 0.10;
-  double stationary_acceleration_threshold_m_s2_ = 0.20;
+  double acceleration_deadband_m_s2_ = 0.03;
+  double acceleration_filter_time_constant_sec_ = 0.08;
+  double stationary_acceleration_threshold_m_s2_ = 0.05;
   double stationary_gyro_threshold_rad_s_ = 0.03;
-  double stationary_hold_sec_ = 0.25;
+  double stationary_hold_sec_ = 0.50;
   double stationary_duration_sec_ = 0.0;
   double gravity_adaptation_rate_ = 0.50;
   double velocity_damping_per_sec_ = 0.05;
@@ -698,6 +737,9 @@ private:
   tf2::Vector3 acceleration_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 acceleration_squared_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gravity_odom_{0.0, 0.0, 0.0};
+  tf2::Vector3 planar_x_axis_{1.0, 0.0, 0.0};
+  tf2::Vector3 planar_y_axis_{0.0, 1.0, 0.0};
+  tf2::Vector3 filtered_translation_acceleration_{0.0, 0.0, 0.0};
   tf2::Vector3 position_{0.0, 0.0, 0.0};
   tf2::Vector3 linear_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_angular_velocity_{0.0, 0.0, 0.0};
