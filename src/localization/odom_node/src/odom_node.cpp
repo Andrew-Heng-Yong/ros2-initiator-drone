@@ -117,6 +117,7 @@ public:
     quality_override_ = declare_parameter<bool>("quality_override", false);
     integrate_linear_acceleration_ =
       declare_parameter<bool>("integrate_linear_acceleration", true);
+    planar_translation_ = declare_parameter<bool>("planar_translation", true);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -222,6 +223,12 @@ public:
         get_logger(),
         "IMU-only translation active: acceleration will drive /odom position, but drift is "
         "unbounded without an external position reference");
+      if (planar_translation_) {
+        RCLCPP_INFO(
+          get_logger(),
+          "Planar translation active: odometry Z position, velocity, and acceleration are "
+          "constrained to zero");
+      }
     }
   }
 
@@ -517,9 +524,15 @@ private:
       tf2::quatRotate(orientation_, linear_acceleration);
     const tf2::Vector3 gravity_compensated_acceleration =
       observed_gravity_and_acceleration - gravity_odom_;
+    tf2::Vector3 translation_acceleration = gravity_compensated_acceleration;
+    if (planar_translation_) {
+      translation_acceleration.setZ(0.0);
+      linear_velocity_.setZ(0.0);
+      position_.setZ(0.0);
+    }
     const bool stationary_candidate =
       angular_velocity.length() <= stationary_gyro_threshold_rad_s_ &&
-      gravity_compensated_acceleration.length() <= stationary_acceleration_threshold_m_s2_;
+      translation_acceleration.length() <= stationary_acceleration_threshold_m_s2_;
     stationary_duration_sec_ = stationary_candidate ? stationary_duration_sec_ + dt : 0.0;
 
     if (stationary_duration_sec_ >= stationary_hold_sec_) {
@@ -531,14 +544,20 @@ private:
     }
 
     tf2::Vector3 acceleration_odom = apply_deadband(
-      gravity_compensated_acceleration, acceleration_deadband_m_s2_);
+      translation_acceleration, acceleration_deadband_m_s2_);
     acceleration_odom = limit_magnitude(acceleration_odom, max_linear_acceleration_m_s2_);
     const tf2::Vector3 previous_velocity = linear_velocity_;
     linear_velocity_ += acceleration_odom * dt;
     const double damping = std::exp(-velocity_damping_per_sec_ * dt);
     linear_velocity_ *= damping;
     linear_velocity_ = limit_magnitude(linear_velocity_, max_linear_speed_m_s_);
+    if (planar_translation_) {
+      linear_velocity_.setZ(0.0);
+    }
     position_ += (previous_velocity + linear_velocity_) * (0.5 * dt);
+    if (planar_translation_) {
+      position_.setZ(0.0);
+    }
     position_variance_ += position_variance_growth_per_sec_ * dt;
   }
 
@@ -597,13 +616,15 @@ private:
       position_variance_ : unobserved_position_variance_));
     odometry.pose.covariance[0] = position_variance;
     odometry.pose.covariance[7] = position_variance;
-    odometry.pose.covariance[14] = position_variance;
+    odometry.pose.covariance[14] = planar_translation_ ?
+      static_position_variance_ : position_variance;
     odometry.pose.covariance[21] = orientation_variance_;
     odometry.pose.covariance[28] = orientation_variance_;
     odometry.pose.covariance[35] = orientation_variance_;
     odometry.twist.covariance[0] = position_variance;
     odometry.twist.covariance[7] = position_variance;
-    odometry.twist.covariance[14] = position_variance;
+    odometry.twist.covariance[14] = planar_translation_ ?
+      static_position_variance_ : position_variance;
     odometry.twist.covariance[21] = angular_velocity_variance_;
     odometry.twist.covariance[28] = angular_velocity_variance_;
     odometry.twist.covariance[35] = angular_velocity_variance_;
@@ -633,6 +654,7 @@ private:
   bool static_override_ = false;
   bool quality_override_ = false;
   bool integrate_linear_acceleration_ = true;
+  bool planar_translation_ = true;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;

@@ -15,9 +15,12 @@ odom_node:
     # Force position confidence low enough for visualization clients regardless
     # of inertial drift. This changes reported quality only.
     quality_override: false
-    # Experimental IMU-only translation. This drives /odom XYZ for existing
+    # Experimental IMU-only translation. This drives /odom XY for existing
     # clients without app changes, but will drift without an external reference.
     integrate_linear_acceleration: true
+    # Ground-robot constraint: prevent gravity error from integrating into
+    # runaway vertical position. Disable only when genuine Z motion is required.
+    planar_translation: true
 
     gyro_deadband_rad_s: 0.005
     calibrate_on_startup: true

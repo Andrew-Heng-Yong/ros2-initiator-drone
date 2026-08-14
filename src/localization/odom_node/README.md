@@ -8,12 +8,15 @@ disabled.
 With the supplied `integrate_linear_acceleration: true` configuration, mounted acceleration is
 rotated into `odom`, the calibrated gravity reference is removed, and the remainder is integrated
 into velocity and position. Deadbanding, velocity damping and limits, and a stationary
-zero-velocity update constrain obvious runaway. This makes existing `/odom` clients react to
-linear motion without app changes. It is still IMU-only dead reckoning: small bias and attitude
-errors are integrated twice, so position will drift and must not be treated as a safety-grade or
-long-term position estimate. Add optical flow, VIO, wheel odometry, GPS, or another external
-reference for reliable translation. Set `integrate_linear_acceleration: false` to restore the
-orientation-only behavior and unobserved position covariance.
+zero-velocity update constrain obvious runaway. `planar_translation: true` additionally removes Z
+acceleration and locks Z velocity and position to zero. This ground-robot constraint prevents a
+small gravity error from integrating into a vertical launch or fall while leaving X/Y motion live.
+Disable it only when genuine vertical motion is required. This makes existing `/odom` clients
+react to linear motion without app changes. It is still IMU-only dead reckoning: small bias and
+attitude errors are integrated twice, so X/Y position will drift and must not be treated as a
+safety-grade or long-term position estimate. Add optical flow, VIO, wheel odometry, GPS, or another
+external reference for reliable translation. Set `integrate_linear_acceleration: false` to restore
+the orientation-only behavior and unobserved position covariance.
 
 For stationary bench testing, set `static_override: true` or launch with
 `static_override:=true`. This skips gyro calibration and integration and publishes a fixed identity
