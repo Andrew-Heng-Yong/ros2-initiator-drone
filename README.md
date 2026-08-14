@@ -76,8 +76,8 @@ The node consumes only `/imu/data_raw`. Its stationary calibration normalizes th
 acceleration magnitude to standard gravity, allowing integration to work with MPU-compatible
 boards whose effective acceleration scale differs from register readback. It publishes completion
 on `/odom/calibrated` once per second (with transient-local durability for native ROS subscribers)
-and publishes
-bias-corrected gyro values, integrated relative orientation, and diagnostic acceleration on
+and applies a ten-read rolling mean to gyro and acceleration before publishing bias-corrected gyro
+values, integrated relative orientation, and diagnostic acceleration on
 `/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
 acceleration into `/odom` velocity and position, with stationary zero-velocity resets. Translation
 is planar by default: it projects motion onto the calibrated gravity plane and locks Z to zero so

@@ -5,6 +5,11 @@ while the drone is stationary, and publishes relative pose and velocity as
 `nav_msgs/msg/Odometry` on `/odom`. It also broadcasts `odom -> base_link` unless `publish_tf` is
 disabled.
 
+Both gyro and acceleration pass through a rolling mean before calibration, attitude integration,
+translation integration, and calibrated IMU publication. `imu_average_window_size: 10` uses the
+latest ten reads while retaining the input update rate after the window fills. At 100 Hz this adds
+about 45 ms of mean measurement delay; set the parameter to `1` to disable averaging.
+
 To inspect the stationary IMU calibration independently, run the included Python sampler while
 the robot is completely still. It collects exactly 1,000 valid samples by default and reports the
 raw acceleration mean and noise, measured gravity magnitude, odometry acceleration scale, and

@@ -30,6 +30,9 @@ odom_node:
     saved_raw_gyro_bias_rad_s: [0.0, 0.0, 0.0]
     saved_raw_acceleration_mean_m_s2: [0.0, 0.0, 9.80665]
     saved_acceleration_scale_factor: 1.0
+    # Smooth both gyro and acceleration with a rolling mean while retaining the
+    # original publication rate. Ten reads add about 45 ms mean delay at 100 Hz.
+    imu_average_window_size: 10
 
     gyro_deadband_rad_s: 0.005
     calibrate_on_startup: true

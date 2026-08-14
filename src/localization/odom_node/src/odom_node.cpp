@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <deque>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -139,6 +140,7 @@ public:
       "saved_raw_acceleration_mean_m_s2");
     saved_acceleration_scale_factor_ =
       declare_parameter<double>("saved_acceleration_scale_factor", 1.0);
+    imu_average_window_size_ = declare_parameter<int>("imu_average_window_size", 10);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -269,6 +271,8 @@ public:
           "constrained to zero");
       }
     }
+    RCLCPP_INFO(
+      get_logger(), "IMU rolling average enabled over %d reads", imu_average_window_size_);
   }
 
 private:
@@ -280,7 +284,8 @@ private:
     {
       throw std::invalid_argument("topic, service, and frame parameters must not be empty");
     }
-    if (gyro_deadband_rad_s_ < 0.0 || initialization_samples_ < 10 ||
+    if (gyro_deadband_rad_s_ < 0.0 || imu_average_window_size_ < 1 ||
+      initialization_samples_ < 10 ||
       startup_initialization_samples_ < 10 || max_calibration_angular_speed_rad_s_ <= 0.0 ||
       max_calibration_gyro_stddev_rad_s_ <= 0.0 ||
       max_calibration_accel_stddev_m_s2_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
@@ -320,13 +325,6 @@ private:
       return;
     }
 
-    if (static_override_) {
-      publish_outputs(
-        rclcpp::Time(message->header.stamp), tf2::Vector3(0.0, 0.0, 0.0),
-        mounted_acceleration, true);
-      return;
-    }
-
     const tf2::Vector3 raw_gyro = tf2::quatRotate(
       imu_to_body_, tf2::Vector3(
         message->angular_velocity.x,
@@ -339,15 +337,29 @@ private:
     }
 
     const rclcpp::Time stamp(message->header.stamp);
+    tf2::Vector3 averaged_acceleration;
+    tf2::Vector3 averaged_gyro;
+    if (!update_imu_average(
+        mounted_acceleration, raw_gyro, averaged_acceleration, averaged_gyro))
+    {
+      return;
+    }
+
+    if (static_override_) {
+      publish_outputs(
+        stamp, tf2::Vector3(0.0, 0.0, 0.0), averaged_acceleration, true);
+      return;
+    }
+
     if (!initialized_) {
-      collect_calibration_sample(raw_gyro, mounted_acceleration, stamp);
+      collect_calibration_sample(averaged_gyro, averaged_acceleration, stamp);
       return;
     }
 
     const tf2::Vector3 angular_velocity =
-      apply_deadband(raw_gyro - gyro_bias_, gyro_deadband_rad_s_);
+      apply_deadband(averaged_gyro - gyro_bias_, gyro_deadband_rad_s_);
     const tf2::Vector3 calibrated_acceleration =
-      mounted_acceleration * acceleration_scale_factor_;
+      averaged_acceleration * acceleration_scale_factor_;
     if (!has_previous_sample_) {
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
@@ -389,6 +401,40 @@ private:
     publish_outputs(stamp, angular_velocity, calibrated_acceleration);
   }
 
+  bool update_imu_average(
+    const tf2::Vector3 & acceleration, const tf2::Vector3 & gyro,
+    tf2::Vector3 & averaged_acceleration, tf2::Vector3 & averaged_gyro)
+  {
+    acceleration_average_window_.push_back(acceleration);
+    gyro_average_window_.push_back(gyro);
+    acceleration_average_sum_ += acceleration;
+    gyro_average_sum_ += gyro;
+
+    const auto window_size = static_cast<std::size_t>(imu_average_window_size_);
+    while (acceleration_average_window_.size() > window_size) {
+      acceleration_average_sum_ -= acceleration_average_window_.front();
+      acceleration_average_window_.pop_front();
+      gyro_average_sum_ -= gyro_average_window_.front();
+      gyro_average_window_.pop_front();
+    }
+    if (acceleration_average_window_.size() < window_size) {
+      return false;
+    }
+
+    const double sample_count = static_cast<double>(window_size);
+    averaged_acceleration = acceleration_average_sum_ / sample_count;
+    averaged_gyro = gyro_average_sum_ / sample_count;
+    return true;
+  }
+
+  void clear_imu_average()
+  {
+    acceleration_average_window_.clear();
+    gyro_average_window_.clear();
+    acceleration_average_sum_.setValue(0.0, 0.0, 0.0);
+    gyro_average_sum_.setValue(0.0, 0.0, 0.0);
+  }
+
   void start_calibration(const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
     if (static_override_) {
@@ -406,6 +452,7 @@ private:
 
   void reset_for_calibration(int sample_count)
   {
+    clear_imu_average();
     initialized_ = false;
     has_previous_sample_ = false;
     active_initialization_samples_ = sample_count;
@@ -766,6 +813,7 @@ private:
   int startup_initialization_samples_ = 1000;
   int active_initialization_samples_ = 1000;
   int initialization_count_ = 0;
+  int imu_average_window_size_ = 10;
   double gyro_deadband_rad_s_ = 0.005;
   double max_calibration_angular_speed_rad_s_ = 0.50;
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
@@ -810,6 +858,10 @@ private:
   tf2::Vector3 position_{0.0, 0.0, 0.0};
   tf2::Vector3 linear_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_angular_velocity_{0.0, 0.0, 0.0};
+  tf2::Vector3 acceleration_average_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 gyro_average_sum_{0.0, 0.0, 0.0};
+  std::deque<tf2::Vector3> acceleration_average_window_;
+  std::deque<tf2::Vector3> gyro_average_window_;
   rclcpp::Time last_imu_stamp_{0, 0, RCL_ROS_TIME};
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
