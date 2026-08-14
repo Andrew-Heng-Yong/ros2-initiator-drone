@@ -10,6 +10,12 @@ translation integration, and calibrated IMU publication. `imu_average_window_siz
 latest ten reads while retaining the input update rate after the window fills. At 100 Hz this adds
 about 45 ms of mean measurement delay; set the parameter to `1` to disable averaging.
 
+Stationarity uses low temporal variance in a window of gravity-compensated planar acceleration,
+low gyro rate, and a broad mean-bias sanity cap. It does not require acceleration bias to fall
+inside a small fixed deadband. Once a stationary interval is confirmed, the node zeros velocity,
+adapts its gravity reference, and restores the position from the beginning of the confirmation
+window so persistent sensor bias during that window is not recorded as displacement.
+
 To inspect the stationary IMU calibration independently, run the included Python sampler while
 the robot is completely still. It collects exactly 1,000 valid samples by default and reports the
 raw acceleration mean and noise, measured gravity magnitude, odometry acceleration scale, and

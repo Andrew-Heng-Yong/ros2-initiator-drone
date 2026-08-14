@@ -43,7 +43,11 @@ odom_node:
     # Preserve gentle ground-robot acceleration while filtering sensor noise.
     acceleration_deadband_m_s2: 0.03
     acceleration_filter_time_constant_sec: 0.08
-    stationary_acceleration_threshold_m_s2: 0.05
+    # Detect rest from low temporal variance instead of requiring acceleration
+    # bias to be near zero. The broad bias cap rejects genuine strong motion.
+    stationary_detection_window_size: 50
+    stationary_acceleration_stddev_threshold_m_s2: 0.08
+    stationary_acceleration_max_bias_m_s2: 1.0
     stationary_gyro_threshold_rad_s: 0.03
     stationary_hold_sec: 0.50
     gravity_adaptation_rate: 0.50

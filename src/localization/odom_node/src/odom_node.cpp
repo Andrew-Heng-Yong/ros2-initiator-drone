@@ -165,8 +165,12 @@ public:
       declare_parameter<double>("acceleration_deadband_m_s2", 0.03);
     acceleration_filter_time_constant_sec_ =
       declare_parameter<double>("acceleration_filter_time_constant_sec", 0.08);
-    stationary_acceleration_threshold_m_s2_ =
-      declare_parameter<double>("stationary_acceleration_threshold_m_s2", 0.05);
+    stationary_detection_window_size_ =
+      declare_parameter<int>("stationary_detection_window_size", 50);
+    stationary_acceleration_stddev_threshold_m_s2_ =
+      declare_parameter<double>("stationary_acceleration_stddev_threshold_m_s2", 0.08);
+    stationary_acceleration_max_bias_m_s2_ =
+      declare_parameter<double>("stationary_acceleration_max_bias_m_s2", 1.0);
     stationary_gyro_threshold_rad_s_ =
       declare_parameter<double>("stationary_gyro_threshold_rad_s", 0.03);
     stationary_hold_sec_ = declare_parameter<double>("stationary_hold_sec", 0.50);
@@ -258,6 +262,11 @@ public:
     }
     RCLCPP_INFO(
       get_logger(), "IMU rolling average enabled over %d reads", imu_average_window_size_);
+    RCLCPP_INFO(
+      get_logger(),
+      "Stationary detector uses %d planar samples: max stddev %.3f m/s^2, max bias %.3f m/s^2",
+      stationary_detection_window_size_, stationary_acceleration_stddev_threshold_m_s2_,
+      stationary_acceleration_max_bias_m_s2_);
   }
 
 private:
@@ -275,7 +284,9 @@ private:
       max_calibration_gyro_stddev_rad_s_ <= 0.0 ||
       max_calibration_accel_stddev_m_s2_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
       acceleration_deadband_m_s2_ < 0.0 || acceleration_filter_time_constant_sec_ < 0.0 ||
-      stationary_acceleration_threshold_m_s2_ <= 0.0 ||
+      stationary_detection_window_size_ < 2 ||
+      stationary_acceleration_stddev_threshold_m_s2_ <= 0.0 ||
+      stationary_acceleration_max_bias_m_s2_ <= 0.0 ||
       stationary_gyro_threshold_rad_s_ <= 0.0 || stationary_hold_sec_ < 0.0 ||
       gravity_adaptation_rate_ < 0.0 || velocity_damping_per_sec_ < 0.0 ||
       max_linear_acceleration_m_s2_ <= 0.0 || max_linear_speed_m_s_ <= 0.0 ||
@@ -415,6 +426,55 @@ private:
     gyro_average_sum_.setValue(0.0, 0.0, 0.0);
   }
 
+  bool acceleration_is_stationary(const tf2::Vector3 & acceleration)
+  {
+    stationary_acceleration_window_.push_back(acceleration);
+    stationary_acceleration_sum_ += acceleration;
+    stationary_acceleration_squared_sum_ += tf2::Vector3(
+      acceleration.x() * acceleration.x(),
+      acceleration.y() * acceleration.y(),
+      acceleration.z() * acceleration.z());
+
+    const auto window_size = static_cast<std::size_t>(stationary_detection_window_size_);
+    while (stationary_acceleration_window_.size() > window_size) {
+      const tf2::Vector3 oldest = stationary_acceleration_window_.front();
+      stationary_acceleration_sum_ -= oldest;
+      stationary_acceleration_squared_sum_ -= tf2::Vector3(
+        oldest.x() * oldest.x(), oldest.y() * oldest.y(), oldest.z() * oldest.z());
+      stationary_acceleration_window_.pop_front();
+    }
+    if (stationary_acceleration_window_.size() < window_size) {
+      return false;
+    }
+
+    const double sample_count = static_cast<double>(window_size);
+    const tf2::Vector3 mean = stationary_acceleration_sum_ / sample_count;
+    const tf2::Vector3 variance(
+      std::max(
+        0.0, stationary_acceleration_squared_sum_.x() / sample_count -
+        mean.x() * mean.x()),
+      std::max(
+        0.0, stationary_acceleration_squared_sum_.y() / sample_count -
+        mean.y() * mean.y()),
+      std::max(
+        0.0, stationary_acceleration_squared_sum_.z() / sample_count -
+        mean.z() * mean.z()));
+    const double maximum_stddev =
+      std::sqrt(std::max({variance.x(), variance.y(), variance.z()}));
+    const bool has_low_variance =
+      maximum_stddev <= stationary_acceleration_stddev_threshold_m_s2_;
+    const bool has_plausible_bias =
+      mean.length() <= stationary_acceleration_max_bias_m_s2_;
+    return has_low_variance && has_plausible_bias;
+  }
+
+  void clear_stationary_detector()
+  {
+    stationary_acceleration_window_.clear();
+    stationary_acceleration_sum_.setValue(0.0, 0.0, 0.0);
+    stationary_acceleration_squared_sum_.setValue(0.0, 0.0, 0.0);
+  }
+
   void start_calibration(const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
   {
     if (static_override_) {
@@ -424,7 +484,7 @@ private:
     }
     reset_for_calibration(initialization_samples_);
     response->success = true;
-      response->message = "IMU calibration started; keep the drone stationary";
+    response->message = "IMU calibration started; keep the drone stationary";
     RCLCPP_INFO(
       get_logger(), "IMU calibration started; collecting %d stationary samples",
       initialization_samples_);
@@ -433,6 +493,7 @@ private:
   void reset_for_calibration(int sample_count)
   {
     clear_imu_average();
+    clear_stationary_detector();
     initialized_ = false;
     has_previous_sample_ = false;
     active_initialization_samples_ = sample_count;
@@ -444,6 +505,7 @@ private:
     gyro_bias_.setValue(0.0, 0.0, 0.0);
     previous_angular_velocity_.setValue(0.0, 0.0, 0.0);
     position_.setValue(0.0, 0.0, 0.0);
+    stationary_candidate_start_position_.setValue(0.0, 0.0, 0.0);
     linear_velocity_.setValue(0.0, 0.0, 0.0);
     filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
     gravity_odom_.setValue(0.0, 0.0, 0.0);
@@ -658,6 +720,7 @@ private:
       linear_velocity_.setZ(0.0);
       position_.setZ(0.0);
     }
+    const bool stable_acceleration = acceleration_is_stationary(translation_acceleration);
     const double acceleration_filter_alpha = acceleration_filter_time_constant_sec_ < kSmallAngle ?
       1.0 : dt / (acceleration_filter_time_constant_sec_ + dt);
     filtered_translation_acceleration_ =
@@ -666,14 +729,26 @@ private:
     translation_acceleration = filtered_translation_acceleration_;
     const bool stationary_candidate =
       angular_velocity.length() <= stationary_gyro_threshold_rad_s_ &&
-      translation_acceleration.length() <= stationary_acceleration_threshold_m_s2_;
-    stationary_duration_sec_ = stationary_candidate ? stationary_duration_sec_ + dt : 0.0;
+      stable_acceleration;
+    if (stationary_candidate) {
+      if (stationary_duration_sec_ == 0.0) {
+        stationary_candidate_start_position_ = position_;
+      }
+      stationary_duration_sec_ += dt;
+    } else {
+      stationary_duration_sec_ = 0.0;
+    }
 
     if (stationary_duration_sec_ >= stationary_hold_sec_) {
       const double gravity_blend = std::clamp(gravity_adaptation_rate_ * dt, 0.0, 1.0);
       gravity_odom_ = gravity_odom_ * (1.0 - gravity_blend) +
         observed_gravity_and_acceleration * gravity_blend;
+      // The acceleration accumulated while waiting to confirm stationarity was sensor drift,
+      // not real motion. Restore the pose from the start of that decision window as well as
+      // applying the usual zero-velocity update.
+      position_ = stationary_candidate_start_position_;
       linear_velocity_.setValue(0.0, 0.0, 0.0);
+      filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
       return;
     }
 
@@ -800,6 +875,7 @@ private:
   int active_initialization_samples_ = 1000;
   int initialization_count_ = 0;
   int imu_average_window_size_ = 10;
+  int stationary_detection_window_size_ = 50;
   double gyro_deadband_rad_s_ = 0.005;
   double max_calibration_angular_speed_rad_s_ = 0.50;
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
@@ -807,7 +883,8 @@ private:
   double max_imu_gap_sec_ = 0.25;
   double acceleration_deadband_m_s2_ = 0.03;
   double acceleration_filter_time_constant_sec_ = 0.08;
-  double stationary_acceleration_threshold_m_s2_ = 0.05;
+  double stationary_acceleration_stddev_threshold_m_s2_ = 0.08;
+  double stationary_acceleration_max_bias_m_s2_ = 1.0;
   double stationary_gyro_threshold_rad_s_ = 0.03;
   double stationary_hold_sec_ = 0.50;
   double stationary_duration_sec_ = 0.0;
@@ -840,12 +917,16 @@ private:
   tf2::Vector3 planar_y_axis_{0.0, 1.0, 0.0};
   tf2::Vector3 filtered_translation_acceleration_{0.0, 0.0, 0.0};
   tf2::Vector3 position_{0.0, 0.0, 0.0};
+  tf2::Vector3 stationary_candidate_start_position_{0.0, 0.0, 0.0};
   tf2::Vector3 linear_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_angular_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 acceleration_average_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_average_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 stationary_acceleration_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 stationary_acceleration_squared_sum_{0.0, 0.0, 0.0};
   std::deque<tf2::Vector3> acceleration_average_window_;
   std::deque<tf2::Vector3> gyro_average_window_;
+  std::deque<tf2::Vector3> stationary_acceleration_window_;
   rclcpp::Time last_imu_stamp_{0, 0, RCL_ROS_TIME};
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
