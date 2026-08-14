@@ -30,9 +30,7 @@ gyro bias, and integrates the midpoint of consecutive angular-rate samples. Tran
 same published orientation seen by clients. A sample window is considered stationary only when
 both angular rate and gravity-compensated acceleration remain near zero; sustained
 stationarity zeros velocity and slowly adapts the gravity reference. The node does not integrate
-across out-of-order timestamps or gaps longer than `max_imu_gap_sec`. `invert_yaw` reverses only
-the published Euler yaw and Z angular rate; internal integration keeps the original gyro axes so
-roll and pitch are unchanged.
+across out-of-order timestamps or gaps longer than `max_imu_gap_sec`.
 
 Build and run it directly:
 

@@ -15,8 +15,6 @@ odom_node:
     # Force position confidence low enough for visualization clients regardless
     # of inertial drift. This changes reported quality only.
     quality_override: false
-    # Match the robot convention by reversing published yaw without changing roll/pitch.
-    invert_yaw: true
     # Experimental IMU-only translation. This drives /odom XYZ for existing
     # clients without app changes, but will drift without an external reference.
     integrate_linear_acceleration: true

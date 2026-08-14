@@ -16,7 +16,6 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
-#include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
 #include "tf2_ros/transform_broadcaster.h"
@@ -95,22 +94,6 @@ geometry_msgs::msg::Vector3 vector_message(const tf2::Vector3 & value)
   return message;
 }
 
-tf2::Quaternion orientation_with_inverted_yaw(
-  const tf2::Quaternion & orientation, bool invert_yaw)
-{
-  if (!invert_yaw) {
-    return orientation;
-  }
-  double roll = 0.0;
-  double pitch = 0.0;
-  double yaw = 0.0;
-  tf2::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
-  tf2::Quaternion output;
-  output.setRPY(roll, pitch, -yaw);
-  output.normalize();
-  return output;
-}
-
 }  // namespace
 
 class OdomNode final : public rclcpp::Node
@@ -132,7 +115,6 @@ public:
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     static_override_ = declare_parameter<bool>("static_override", false);
     quality_override_ = declare_parameter<bool>("quality_override", false);
-    invert_yaw_ = declare_parameter<bool>("invert_yaw", true);
     integrate_linear_acceleration_ =
       declare_parameter<bool>("integrate_linear_acceleration", true);
 
@@ -515,9 +497,7 @@ private:
     {
       return;
     }
-    const tf2::Quaternion published_orientation =
-      orientation_with_inverted_yaw(orientation_, invert_yaw_);
-    gravity_odom_ = tf2::quatRotate(published_orientation, linear_acceleration);
+    gravity_odom_ = tf2::quatRotate(orientation_, linear_acceleration);
     has_gravity_reference_ = linear_acceleration.length() > kSmallAngle;
   }
 
@@ -533,10 +513,8 @@ private:
       return;
     }
 
-    const tf2::Quaternion published_orientation =
-      orientation_with_inverted_yaw(orientation_, invert_yaw_);
     const tf2::Vector3 observed_gravity_and_acceleration =
-      tf2::quatRotate(published_orientation, linear_acceleration);
+      tf2::quatRotate(orientation_, linear_acceleration);
     const tf2::Vector3 gravity_compensated_acceleration =
       observed_gravity_and_acceleration - gravity_odom_;
     const bool stationary_candidate =
@@ -582,17 +560,11 @@ private:
     const tf2::Vector3 & linear_acceleration,
     bool static_pose = false)
   {
-    const tf2::Quaternion published_orientation =
-      orientation_with_inverted_yaw(orientation_, invert_yaw_);
-    const tf2::Vector3 published_angular_velocity(
-      angular_velocity.x(), angular_velocity.y(),
-      invert_yaw_ ? -angular_velocity.z() : angular_velocity.z());
-
     sensor_msgs::msg::Imu imu;
     imu.header.stamp = stamp;
     imu.header.frame_id = base_frame_;
-    imu.orientation = quaternion_message(published_orientation);
-    imu.angular_velocity = vector_message(published_angular_velocity);
+    imu.orientation = quaternion_message(orientation_);
+    imu.angular_velocity = vector_message(angular_velocity);
     imu.linear_acceleration = vector_message(linear_acceleration);
     imu.orientation_covariance[0] = orientation_variance_;
     imu.orientation_covariance[4] = orientation_variance_;
@@ -612,9 +584,9 @@ private:
     odometry.pose.pose.position.x = position_.x();
     odometry.pose.pose.position.y = position_.y();
     odometry.pose.pose.position.z = position_.z();
-    odometry.pose.pose.orientation = quaternion_message(published_orientation);
+    odometry.pose.pose.orientation = quaternion_message(orientation_);
     odometry.twist.twist.linear = vector_message(linear_velocity_);
-    odometry.twist.twist.angular = vector_message(published_angular_velocity);
+    odometry.twist.twist.angular = vector_message(angular_velocity);
 
     // Static override promises a fixed origin. Quality override changes only reported confidence.
     // Otherwise inertial translation reports a growing variance; disabled integration retains the
@@ -644,7 +616,7 @@ private:
       transform.transform.translation.x = position_.x();
       transform.transform.translation.y = position_.y();
       transform.transform.translation.z = position_.z();
-      transform.transform.rotation = quaternion_message(published_orientation);
+      transform.transform.rotation = quaternion_message(orientation_);
       transform_broadcaster_->sendTransform(transform);
     }
   }
@@ -660,7 +632,6 @@ private:
   bool publish_tf_ = true;
   bool static_override_ = false;
   bool quality_override_ = false;
-  bool invert_yaw_ = true;
   bool integrate_linear_acceleration_ = true;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
