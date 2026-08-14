@@ -1,13 +1,19 @@
 # Odometry node
 
-`odom_node` consumes gyroscope samples from `/imu/data_raw`, estimates startup bias while the
-drone is stationary, and publishes relative orientation and angular velocity as
-`nav_msgs/msg/Odometry` on `/odom`. It also broadcasts `odom -> base_link` unless `publish_tf`
-is disabled.
+`odom_node` consumes IMU samples from `/imu/data_raw`, estimates gyro bias and a gravity reference
+while the drone is stationary, and publishes relative pose and velocity as
+`nav_msgs/msg/Odometry` on `/odom`. It also broadcasts `odom -> base_link` unless `publish_tf` is
+disabled.
 
-This interim estimator intentionally ignores images and linear acceleration. Position and linear
-velocity remain zero with a large covariance because they are unobserved. Flow-sensor updates can
-later supply translation without changing the gyro propagation boundary.
+With the supplied `integrate_linear_acceleration: true` configuration, mounted acceleration is
+rotated into `odom`, the calibrated gravity reference is removed, and the remainder is integrated
+into velocity and position. Deadbanding, velocity damping and limits, and a stationary
+zero-velocity update constrain obvious runaway. This makes existing `/odom` clients react to
+linear motion without app changes. It is still IMU-only dead reckoning: small bias and attitude
+errors are integrated twice, so position will drift and must not be treated as a safety-grade or
+long-term position estimate. Add optical flow, VIO, wheel odometry, GPS, or another external
+reference for reliable translation. Set `integrate_linear_acceleration: false` to restore the
+orientation-only behavior and unobserved position covariance.
 
 For stationary bench testing, set `static_override: true` or launch with
 `static_override:=true`. This skips gyro calibration and integration and publishes a fixed identity
@@ -15,17 +21,18 @@ pose at the `odom` origin with `static_position_variance`. The fixed pose is adv
 calibrated and position-observed, so the iPhone app reports **Robot track: Tracking**. Disable the
 override and restart before the robot can move.
 
-Set `quality_override: true` (or launch with `quality_override:=true`) to keep normal live gyro
-orientation while forcing the unobserved zero translation to use
-`quality_override_position_variance`. This makes covariance-based clients report full tracking
-even though position is still not measured. It changes only the advertised quality, not the
-estimate.
+Set `quality_override: true` (or launch with `quality_override:=true`) to force
+`quality_override_position_variance` regardless of the inertial estimator's growing uncertainty.
+It changes only advertised confidence, not the pose estimate or its drift.
 
-The node rotates gyro samples from the mounted IMU frame into `base_link`, removes the stationary
-bias, applies a small noise deadband, and integrates the midpoint of consecutive angular-rate
-samples. It does not integrate across out-of-order timestamps or gaps longer than
-`max_imu_gap_sec`. `invert_yaw` reverses the mounted IMU's Z angular rate before calibration and
-integration; it is enabled in the supplied configuration to match the robot yaw convention.
+The node rotates IMU samples from the mounted sensor frame into `base_link`, removes stationary
+gyro bias, and integrates the midpoint of consecutive angular-rate samples. Translation uses the
+same published orientation seen by clients. A sample window is considered stationary only when
+both angular rate and gravity-compensated acceleration remain near zero; sustained
+stationarity zeros velocity and slowly adapts the gravity reference. The node does not integrate
+across out-of-order timestamps or gaps longer than `max_imu_gap_sec`. `invert_yaw` reverses only
+the published Euler yaw and Z angular rate; internal integration keeps the original gyro axes so
+roll and pitch are unchanged.
 
 Build and run it directly:
 
@@ -56,11 +63,11 @@ ros2 launch drone_control drone_launch.py \
   start_odom:=true odom_quality_override:=true
 ```
 
-Keep the drone stationary while the first `startup_initialization_samples` messages arrive. Sample
-standard deviation is used to reject a window with movement. The mean is learned as the stationary
-zero-rate bias and is accepted up to the generous `max_calibration_angular_speed_rad_s` sensor
-sanity limit. Calibration state is transient-local on `/odom/calibrated` and is also republished
-once per second so rosbridge clients that connect after startup still receive it.
+Keep the drone stationary while the first `startup_initialization_samples` messages arrive. Gyro
+and accelerometer sample standard deviations reject a window with movement. Their means establish
+the stationary gyro bias and gravity reference. Calibration state is transient-local on
+`/odom/calibrated` and is also republished once per second so rosbridge clients that connect after
+startup still receive it. Recalibration resets pose and velocity to the odom origin.
 
 Request recalibration while the drone is stationary:
 
@@ -68,7 +75,9 @@ Request recalibration while the drone is stationary:
 ros2 service call /odom/calibrate std_srvs/srv/Trigger '{}'
 ```
 
-`/imu/data_calibrated` contains the integrated relative orientation and bias-corrected angular
-velocity. Its linear-acceleration covariance starts with `-1` to mark that field unavailable.
+`/imu/data_calibrated` contains the integrated relative orientation, bias-corrected angular
+velocity, and mounted-frame acceleration with covariance. Acceleration includes gravity and is
+published for diagnostics; the gravity-compensated value is integrated internally when
+`integrate_linear_acceleration` is enabled.
 Gyro-only orientation has no absolute heading or gravity reference and will drift over time.
 Calibration requests are rejected while the static override is active.

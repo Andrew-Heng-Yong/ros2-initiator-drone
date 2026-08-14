@@ -2,7 +2,7 @@
 <package format="3">
   <name>odom_node</name>
   <version>0.2.0</version>
-  <description>Gyroscope odometry for the initiator drone.</description>
+  <description>IMU dead-reckoning odometry for the initiator drone.</description>
   <maintainer email="user@example.com">Workspace maintainer</maintainer>
   <license>Apache-2.0</license>
 

@@ -6,7 +6,7 @@ This workspace is split into top-level control, localization, and sensor package
 - `src/sensors/mi0802_senxor_driver`: C++ ROS 2 driver for a Meridian Innovation MI0802 SenXor over USB CDC ACM.
 - `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
 - `src/sensors/mpu6050_node`: C++ ROS 2 driver for an MPU6050 accelerometer/gyroscope over Linux I2C.
-- `src/localization/odom_node`: gyro odometry publishing `/odom` and `odom -> base_link`.
+- `src/localization/odom_node`: IMU dead-reckoning odometry publishing `/odom` and `odom -> base_link`.
 
 `mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
 
@@ -74,11 +74,12 @@ ros2 topic echo /odom
 
 The node consumes only `/imu/data_raw`. It publishes completion on `/odom/calibrated` once per
 second (with transient-local durability for native ROS subscribers) and publishes
-bias-corrected gyro values plus the integrated relative orientation on `/imu/data_calibrated`.
-Translation stays unobserved, with large covariance, until flow sensors are added. Parameters are
-configured in `src/localization/odom_node/config/params.yaml`; replace the default IMU mount
-rotation with the measured value before flight. Gyro-only orientation has no absolute heading or
-gravity reference and will drift over time. See the package README for estimator limitations.
+bias-corrected gyro values, integrated relative orientation, and diagnostic acceleration on
+`/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
+acceleration into `/odom` velocity and position, with stationary zero-velocity resets. This gives
+existing clients a motion response but is IMU-only dead reckoning and will drift quickly. Parameters
+are configured in `src/localization/odom_node/config/params.yaml`; replace the default IMU mount
+rotation with the measured value before flight. See the package README for estimator limitations.
 
 For a stationary bench setup, `odom_static_override:=true` bypasses calibration and publishes a
 fixed, calibrated origin pose with observed position covariance. This makes visualization clients

@@ -16,6 +16,7 @@
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
+#include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/LinearMath/Vector3.h"
 #include "tf2_ros/transform_broadcaster.h"
@@ -24,6 +25,8 @@ namespace
 {
 
 constexpr double kSmallAngle = 1.0e-8;
+constexpr double kMinimumGravityMagnitude = 5.0;
+constexpr double kMaximumGravityMagnitude = 15.0;
 
 tf2::Vector3 apply_deadband(const tf2::Vector3 & value, double threshold)
 {
@@ -31,6 +34,15 @@ tf2::Vector3 apply_deadband(const tf2::Vector3 & value, double threshold)
     std::abs(value.x()) < threshold ? 0.0 : value.x(),
     std::abs(value.y()) < threshold ? 0.0 : value.y(),
     std::abs(value.z()) < threshold ? 0.0 : value.z());
+}
+
+tf2::Vector3 limit_magnitude(const tf2::Vector3 & value, double maximum)
+{
+  const double magnitude = value.length();
+  if (magnitude <= maximum || magnitude < kSmallAngle) {
+    return value;
+  }
+  return value * (maximum / magnitude);
 }
 
 tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::string & name)
@@ -83,6 +95,22 @@ geometry_msgs::msg::Vector3 vector_message(const tf2::Vector3 & value)
   return message;
 }
 
+tf2::Quaternion orientation_with_inverted_yaw(
+  const tf2::Quaternion & orientation, bool invert_yaw)
+{
+  if (!invert_yaw) {
+    return orientation;
+  }
+  double roll = 0.0;
+  double pitch = 0.0;
+  double yaw = 0.0;
+  tf2::Matrix3x3(orientation).getRPY(roll, pitch, yaw);
+  tf2::Quaternion output;
+  output.setRPY(roll, pitch, -yaw);
+  output.normalize();
+  return output;
+}
+
 }  // namespace
 
 class OdomNode final : public rclcpp::Node
@@ -105,6 +133,8 @@ public:
     static_override_ = declare_parameter<bool>("static_override", false);
     quality_override_ = declare_parameter<bool>("quality_override", false);
     invert_yaw_ = declare_parameter<bool>("invert_yaw", true);
+    integrate_linear_acceleration_ =
+      declare_parameter<bool>("integrate_linear_acceleration", true);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -115,7 +145,21 @@ public:
       declare_parameter<double>("max_calibration_angular_speed_rad_s", 0.50);
     max_calibration_gyro_stddev_rad_s_ =
       declare_parameter<double>("max_calibration_gyro_stddev_rad_s", 0.03);
+    max_calibration_accel_stddev_m_s2_ =
+      declare_parameter<double>("max_calibration_accel_stddev_m_s2", 0.25);
     max_imu_gap_sec_ = declare_parameter<double>("max_imu_gap_sec", 0.25);
+    acceleration_deadband_m_s2_ =
+      declare_parameter<double>("acceleration_deadband_m_s2", 0.10);
+    stationary_acceleration_threshold_m_s2_ =
+      declare_parameter<double>("stationary_acceleration_threshold_m_s2", 0.20);
+    stationary_gyro_threshold_rad_s_ =
+      declare_parameter<double>("stationary_gyro_threshold_rad_s", 0.03);
+    stationary_hold_sec_ = declare_parameter<double>("stationary_hold_sec", 0.25);
+    gravity_adaptation_rate_ = declare_parameter<double>("gravity_adaptation_rate", 0.50);
+    velocity_damping_per_sec_ = declare_parameter<double>("velocity_damping_per_sec", 0.05);
+    max_linear_acceleration_m_s2_ =
+      declare_parameter<double>("max_linear_acceleration_m_s2", 15.0);
+    max_linear_speed_m_s_ = declare_parameter<double>("max_linear_speed_m_s", 5.0);
 
     imu_to_body_ = quaternion_from_rpy(
       declare_parameter<std::vector<double>>("imu_to_body_rotation_rpy", {0.0, 0.0, 0.0}),
@@ -131,9 +175,16 @@ public:
       declare_parameter<double>("initial_orientation_variance", 0.01);
     angular_velocity_variance_ =
       declare_parameter<double>("angular_velocity_variance", 0.02);
+    linear_acceleration_variance_ =
+      declare_parameter<double>("linear_acceleration_variance", 0.10);
+    initial_inertial_position_variance_ =
+      declare_parameter<double>("initial_inertial_position_variance", 0.25);
+    position_variance_growth_per_sec_ =
+      declare_parameter<double>("position_variance_growth_per_sec", 0.25);
 
     validate_parameters();
     orientation_variance_ = initial_orientation_variance_;
+    position_variance_ = initial_inertial_position_variance_;
 
     odometry_publisher_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, 10);
     calibrated_imu_publisher_ = create_publisher<sensor_msgs::msg::Imu>(
@@ -163,13 +214,13 @@ public:
       publish_calibration_status(true);
       RCLCPP_WARN(
         get_logger(),
-        "Odometry static override active: calibration and gyro integration are disabled; "
+        "Odometry static override active: calibration and IMU integration are disabled; "
         "publishing a fixed calibrated pose at the origin");
     } else if (calibrate_on_startup_) {
       reset_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
         get_logger(),
-        "Gyro calibration started (%d stationary samples); imu=%s output=%s",
+        "IMU calibration started (%d stationary samples); imu=%s output=%s",
         active_initialization_samples_, imu_topic_.c_str(), odom_topic_.c_str());
     } else {
       initialized_ = true;
@@ -181,9 +232,14 @@ public:
     if (quality_override_ && !static_override_) {
       RCLCPP_WARN(
         get_logger(),
-        "Odometry quality override active: unobserved translation will be reported with "
-        "variance %.6f m^2 so consumers treat the pose as tracked",
+        "Odometry quality override active: position will be reported with variance %.6f m^2",
         quality_override_position_variance_);
+    }
+    if (integrate_linear_acceleration_ && !static_override_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "IMU-only translation active: acceleration will drive /odom position, but drift is "
+        "unbounded without an external position reference");
     }
   }
 
@@ -198,11 +254,17 @@ private:
     }
     if (gyro_deadband_rad_s_ < 0.0 || initialization_samples_ < 10 ||
       startup_initialization_samples_ < 10 || max_calibration_angular_speed_rad_s_ <= 0.0 ||
-      max_calibration_gyro_stddev_rad_s_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
+      max_calibration_gyro_stddev_rad_s_ <= 0.0 ||
+      max_calibration_accel_stddev_m_s2_ <= 0.0 || max_imu_gap_sec_ <= 0.0 ||
+      acceleration_deadband_m_s2_ < 0.0 || stationary_acceleration_threshold_m_s2_ <= 0.0 ||
+      stationary_gyro_threshold_rad_s_ <= 0.0 || stationary_hold_sec_ < 0.0 ||
+      gravity_adaptation_rate_ < 0.0 || velocity_damping_per_sec_ < 0.0 ||
+      max_linear_acceleration_m_s2_ <= 0.0 || max_linear_speed_m_s_ <= 0.0 ||
       unobserved_position_variance_ <= 0.0 || static_position_variance_ < 0.0 ||
       quality_override_position_variance_ < 0.0 ||
       initial_orientation_variance_ < 0.0 ||
-      angular_velocity_variance_ < 0.0)
+      angular_velocity_variance_ < 0.0 || linear_acceleration_variance_ < 0.0 ||
+      initial_inertial_position_variance_ < 0.0 || position_variance_growth_per_sec_ < 0.0)
     {
       throw std::invalid_argument("invalid gyro odometry parameters");
     }
@@ -210,20 +272,29 @@ private:
 
   void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr & message)
   {
-    if (static_override_) {
-      publish_outputs(
-        rclcpp::Time(message->header.stamp), tf2::Vector3(0.0, 0.0, 0.0), true);
+    const tf2::Vector3 mounted_acceleration = tf2::quatRotate(
+      imu_to_body_, tf2::Vector3(
+        message->linear_acceleration.x,
+        message->linear_acceleration.y,
+        message->linear_acceleration.z));
+    if (!is_finite(mounted_acceleration)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 5000, "Ignoring non-finite accelerometer sample");
       return;
     }
 
-    const tf2::Vector3 mounted_gyro = tf2::quatRotate(
+    if (static_override_) {
+      publish_outputs(
+        rclcpp::Time(message->header.stamp), tf2::Vector3(0.0, 0.0, 0.0),
+        mounted_acceleration, true);
+      return;
+    }
+
+    const tf2::Vector3 raw_gyro = tf2::quatRotate(
       imu_to_body_, tf2::Vector3(
         message->angular_velocity.x,
         message->angular_velocity.y,
         message->angular_velocity.z));
-    const tf2::Vector3 raw_gyro(
-      mounted_gyro.x(), mounted_gyro.y(),
-      invert_yaw_ ? -mounted_gyro.z() : mounted_gyro.z());
     if (!is_finite(raw_gyro)) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "Ignoring non-finite gyro sample");
@@ -232,7 +303,7 @@ private:
 
     const rclcpp::Time stamp(message->header.stamp);
     if (!initialized_) {
-      collect_calibration_sample(raw_gyro, stamp);
+      collect_calibration_sample(raw_gyro, mounted_acceleration, stamp);
       return;
     }
 
@@ -242,7 +313,8 @@ private:
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
       has_previous_sample_ = true;
-      publish_outputs(stamp, angular_velocity);
+      initialize_gravity_reference(mounted_acceleration);
+      publish_outputs(stamp, angular_velocity, mounted_acceleration);
       return;
     }
 
@@ -262,16 +334,19 @@ private:
       orientation_ = orientation_ * delta_quaternion(midpoint_angular_velocity, dt);
       orientation_.normalize();
       orientation_variance_ += angular_velocity_variance_ * dt * dt;
+      integrate_translation(mounted_acceleration, angular_velocity, dt);
     } else {
+      linear_velocity_.setValue(0.0, 0.0, 0.0);
+      stationary_duration_sec_ = 0.0;
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "Gyro gap %.3f s exceeds %.3f s; not integrating across the gap",
+        "IMU gap %.3f s exceeds %.3f s; zeroing velocity and not integrating across the gap",
         dt, max_imu_gap_sec_);
     }
 
     previous_angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
-    publish_outputs(stamp, angular_velocity);
+    publish_outputs(stamp, angular_velocity, mounted_acceleration);
   }
 
   void start_calibration(const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
@@ -283,9 +358,9 @@ private:
     }
     reset_for_calibration(initialization_samples_);
     response->success = true;
-    response->message = "gyro calibration started; keep the drone stationary";
+      response->message = "IMU calibration started; keep the drone stationary";
     RCLCPP_INFO(
-      get_logger(), "Gyro calibration started; collecting %d stationary samples",
+      get_logger(), "IMU calibration started; collecting %d stationary samples",
       initialization_samples_);
   }
 
@@ -297,10 +372,18 @@ private:
     initialization_count_ = 0;
     gyro_sum_.setValue(0.0, 0.0, 0.0);
     gyro_squared_sum_.setValue(0.0, 0.0, 0.0);
+    acceleration_sum_.setValue(0.0, 0.0, 0.0);
+    acceleration_squared_sum_.setValue(0.0, 0.0, 0.0);
     gyro_bias_.setValue(0.0, 0.0, 0.0);
     previous_angular_velocity_.setValue(0.0, 0.0, 0.0);
+    position_.setValue(0.0, 0.0, 0.0);
+    linear_velocity_.setValue(0.0, 0.0, 0.0);
+    gravity_odom_.setValue(0.0, 0.0, 0.0);
+    stationary_duration_sec_ = 0.0;
+    has_gravity_reference_ = false;
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
+    position_variance_ = initial_inertial_position_variance_;
     publish_calibration_status(false);
   }
 
@@ -309,32 +392,57 @@ private:
     initialization_count_ = 0;
     gyro_sum_.setValue(0.0, 0.0, 0.0);
     gyro_squared_sum_.setValue(0.0, 0.0, 0.0);
+    acceleration_sum_.setValue(0.0, 0.0, 0.0);
+    acceleration_squared_sum_.setValue(0.0, 0.0, 0.0);
   }
 
-  void collect_calibration_sample(const tf2::Vector3 & gyro, const rclcpp::Time & stamp)
+  void collect_calibration_sample(
+    const tf2::Vector3 & gyro, const tf2::Vector3 & linear_acceleration,
+    const rclcpp::Time & stamp)
   {
     gyro_sum_ += gyro;
     gyro_squared_sum_ += tf2::Vector3(
       gyro.x() * gyro.x(), gyro.y() * gyro.y(), gyro.z() * gyro.z());
+    acceleration_sum_ += linear_acceleration;
+    acceleration_squared_sum_ += tf2::Vector3(
+      linear_acceleration.x() * linear_acceleration.x(),
+      linear_acceleration.y() * linear_acceleration.y(),
+      linear_acceleration.z() * linear_acceleration.z());
     ++initialization_count_;
     if (initialization_count_ < active_initialization_samples_) {
       return;
     }
 
     const double sample_count = static_cast<double>(initialization_count_);
-    const tf2::Vector3 mean = gyro_sum_ / sample_count;
-    const tf2::Vector3 variance(
-      std::max(0.0, gyro_squared_sum_.x() / sample_count - mean.x() * mean.x()),
-      std::max(0.0, gyro_squared_sum_.y() / sample_count - mean.y() * mean.y()),
-      std::max(0.0, gyro_squared_sum_.z() / sample_count - mean.z() * mean.z()));
-    const double maximum_stddev = std::sqrt(std::max({variance.x(), variance.y(), variance.z()}));
+    const tf2::Vector3 gyro_mean = gyro_sum_ / sample_count;
+    const tf2::Vector3 gyro_variance(
+      std::max(0.0, gyro_squared_sum_.x() / sample_count - gyro_mean.x() * gyro_mean.x()),
+      std::max(0.0, gyro_squared_sum_.y() / sample_count - gyro_mean.y() * gyro_mean.y()),
+      std::max(0.0, gyro_squared_sum_.z() / sample_count - gyro_mean.z() * gyro_mean.z()));
+    const double maximum_gyro_stddev =
+      std::sqrt(std::max({gyro_variance.x(), gyro_variance.y(), gyro_variance.z()}));
+    const tf2::Vector3 acceleration_mean = acceleration_sum_ / sample_count;
+    const tf2::Vector3 acceleration_variance(
+      std::max(
+        0.0, acceleration_squared_sum_.x() / sample_count -
+        acceleration_mean.x() * acceleration_mean.x()),
+      std::max(
+        0.0, acceleration_squared_sum_.y() / sample_count -
+        acceleration_mean.y() * acceleration_mean.y()),
+      std::max(
+        0.0, acceleration_squared_sum_.z() / sample_count -
+        acceleration_mean.z() * acceleration_mean.z()));
+    const double maximum_acceleration_stddev = std::sqrt(std::max(
+      {acceleration_variance.x(), acceleration_variance.y(), acceleration_variance.z()}));
 
-    if (maximum_stddev > max_calibration_gyro_stddev_rad_s_) {
+    if (maximum_gyro_stddev > max_calibration_gyro_stddev_rad_s_ ||
+      maximum_acceleration_stddev > max_calibration_accel_stddev_m_s2_)
+    {
       RCLCPP_WARN(
         get_logger(),
-        "Gyro moved during calibration (max stddev %.5f rad/s, mean %.5f rad/s); "
+        "IMU moved during calibration (gyro stddev %.5f rad/s, accel stddev %.5f m/s^2); "
         "restarting the stationary sample window",
-        maximum_stddev, mean.length());
+        maximum_gyro_stddev, maximum_acceleration_stddev);
       reset_calibration_window();
       return;
     }
@@ -343,17 +451,31 @@ private:
     // the bias this window is intended to learn. Keep only a generous sanity cap for a bad sensor
     // or a calibration attempted during sustained rotation, and use sample variation to detect
     // ordinary movement.
-    if (mean.length() > max_calibration_angular_speed_rad_s_) {
+    if (gyro_mean.length() > max_calibration_angular_speed_rad_s_) {
       RCLCPP_WARN(
         get_logger(),
         "Gyro zero-rate bias %.5f rad/s exceeds calibration limit %.5f rad/s "
         "(max stddev %.5f rad/s); restarting the stationary sample window",
-        mean.length(), max_calibration_angular_speed_rad_s_, maximum_stddev);
+        gyro_mean.length(), max_calibration_angular_speed_rad_s_, maximum_gyro_stddev);
       reset_calibration_window();
       return;
     }
 
-    gyro_bias_ = mean;
+    if (acceleration_mean.length() < kMinimumGravityMagnitude ||
+      acceleration_mean.length() > kMaximumGravityMagnitude)
+    {
+      RCLCPP_WARN(
+        get_logger(),
+        "Acceleration magnitude %.4f m/s^2 is outside the gravity sanity range; "
+        "restarting the stationary sample window",
+        acceleration_mean.length());
+      reset_calibration_window();
+      return;
+    }
+
+    gyro_bias_ = gyro_mean;
+    gravity_odom_ = acceleration_mean;
+    has_gravity_reference_ = acceleration_mean.length() > kSmallAngle;
     previous_angular_velocity_ = apply_deadband(gyro - gyro_bias_, gyro_deadband_rad_s_);
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
@@ -363,10 +485,67 @@ private:
     publish_calibration_status(true);
     RCLCPP_INFO(
       get_logger(),
-      "Gyro initialized after %d samples: bias [%.6f %.6f %.6f] rad/s, "
-      "max stddev %.6f rad/s",
-      initialization_count_, gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(), maximum_stddev);
-    publish_outputs(stamp, previous_angular_velocity_);
+      "IMU initialized after %d samples: gyro bias [%.6f %.6f %.6f] rad/s, "
+      "gravity reference [%.4f %.4f %.4f] m/s^2, gyro stddev %.6f rad/s, "
+      "accel stddev %.6f m/s^2",
+      initialization_count_, gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(),
+      gravity_odom_.x(), gravity_odom_.y(), gravity_odom_.z(), maximum_gyro_stddev,
+      maximum_acceleration_stddev);
+    publish_outputs(stamp, previous_angular_velocity_, linear_acceleration);
+  }
+
+  void initialize_gravity_reference(const tf2::Vector3 & linear_acceleration)
+  {
+    if (has_gravity_reference_ || !integrate_linear_acceleration_) {
+      return;
+    }
+    const tf2::Quaternion published_orientation =
+      orientation_with_inverted_yaw(orientation_, invert_yaw_);
+    gravity_odom_ = tf2::quatRotate(published_orientation, linear_acceleration);
+    has_gravity_reference_ = linear_acceleration.length() > kSmallAngle;
+  }
+
+  void integrate_translation(
+    const tf2::Vector3 & linear_acceleration, const tf2::Vector3 & angular_velocity,
+    double dt)
+  {
+    if (!integrate_linear_acceleration_) {
+      return;
+    }
+    initialize_gravity_reference(linear_acceleration);
+    if (!has_gravity_reference_) {
+      return;
+    }
+
+    const tf2::Quaternion published_orientation =
+      orientation_with_inverted_yaw(orientation_, invert_yaw_);
+    const tf2::Vector3 observed_gravity_and_acceleration =
+      tf2::quatRotate(published_orientation, linear_acceleration);
+    const tf2::Vector3 gravity_compensated_acceleration =
+      observed_gravity_and_acceleration - gravity_odom_;
+    const bool stationary_candidate =
+      angular_velocity.length() <= stationary_gyro_threshold_rad_s_ &&
+      gravity_compensated_acceleration.length() <= stationary_acceleration_threshold_m_s2_;
+    stationary_duration_sec_ = stationary_candidate ? stationary_duration_sec_ + dt : 0.0;
+
+    if (stationary_duration_sec_ >= stationary_hold_sec_) {
+      const double gravity_blend = std::clamp(gravity_adaptation_rate_ * dt, 0.0, 1.0);
+      gravity_odom_ = gravity_odom_ * (1.0 - gravity_blend) +
+        observed_gravity_and_acceleration * gravity_blend;
+      linear_velocity_.setValue(0.0, 0.0, 0.0);
+      return;
+    }
+
+    tf2::Vector3 acceleration_odom = apply_deadband(
+      gravity_compensated_acceleration, acceleration_deadband_m_s2_);
+    acceleration_odom = limit_magnitude(acceleration_odom, max_linear_acceleration_m_s2_);
+    const tf2::Vector3 previous_velocity = linear_velocity_;
+    linear_velocity_ += acceleration_odom * dt;
+    const double damping = std::exp(-velocity_damping_per_sec_ * dt);
+    linear_velocity_ *= damping;
+    linear_velocity_ = limit_magnitude(linear_velocity_, max_linear_speed_m_s_);
+    position_ += (previous_velocity + linear_velocity_) * (0.5 * dt);
+    position_variance_ += position_variance_growth_per_sec_ * dt;
   }
 
   void publish_calibration_status(bool calibrated)
@@ -384,36 +563,49 @@ private:
 
   void publish_outputs(
     const rclcpp::Time & stamp, const tf2::Vector3 & angular_velocity,
+    const tf2::Vector3 & linear_acceleration,
     bool static_pose = false)
   {
+    const tf2::Quaternion published_orientation =
+      orientation_with_inverted_yaw(orientation_, invert_yaw_);
+    const tf2::Vector3 published_angular_velocity(
+      angular_velocity.x(), angular_velocity.y(),
+      invert_yaw_ ? -angular_velocity.z() : angular_velocity.z());
+
     sensor_msgs::msg::Imu imu;
     imu.header.stamp = stamp;
     imu.header.frame_id = base_frame_;
-    imu.orientation = quaternion_message(orientation_);
-    imu.angular_velocity = vector_message(angular_velocity);
+    imu.orientation = quaternion_message(published_orientation);
+    imu.angular_velocity = vector_message(published_angular_velocity);
+    imu.linear_acceleration = vector_message(linear_acceleration);
     imu.orientation_covariance[0] = orientation_variance_;
     imu.orientation_covariance[4] = orientation_variance_;
     imu.orientation_covariance[8] = orientation_variance_;
     imu.angular_velocity_covariance[0] = angular_velocity_variance_;
     imu.angular_velocity_covariance[4] = angular_velocity_variance_;
     imu.angular_velocity_covariance[8] = angular_velocity_variance_;
-    // This estimator intentionally does not use or estimate linear acceleration.
-    imu.linear_acceleration_covariance[0] = -1.0;
+    imu.linear_acceleration_covariance[0] = linear_acceleration_variance_;
+    imu.linear_acceleration_covariance[4] = linear_acceleration_variance_;
+    imu.linear_acceleration_covariance[8] = linear_acceleration_variance_;
     calibrated_imu_publisher_->publish(imu);
 
     nav_msgs::msg::Odometry odometry;
     odometry.header.stamp = stamp;
     odometry.header.frame_id = odom_frame_;
     odometry.child_frame_id = base_frame_;
-    odometry.pose.pose.orientation = quaternion_message(orientation_);
-    odometry.twist.twist.angular = vector_message(angular_velocity);
+    odometry.pose.pose.position.x = position_.x();
+    odometry.pose.pose.position.y = position_.y();
+    odometry.pose.pose.position.z = position_.z();
+    odometry.pose.pose.orientation = quaternion_message(published_orientation);
+    odometry.twist.twist.linear = vector_message(linear_velocity_);
+    odometry.twist.twist.angular = vector_message(published_angular_velocity);
 
-    // In normal gyro-only mode, zero translation is an unobserved placeholder. Static override is
-    // an explicit promise that the robot is fixed at the origin. Quality override makes no such
-    // promise; it deliberately changes only the reported covariance for visualization clients.
+    // Static override promises a fixed origin. Quality override changes only reported confidence.
+    // Otherwise inertial translation reports a growing variance; disabled integration retains the
+    // old unobserved-position contract.
     const double position_variance = static_pose ? static_position_variance_ :
       (quality_override_ ? quality_override_position_variance_ :
-      unobserved_position_variance_);
+      (integrate_linear_acceleration_ ? position_variance_ : unobserved_position_variance_));
     odometry.pose.covariance[0] = position_variance;
     odometry.pose.covariance[7] = position_variance;
     odometry.pose.covariance[14] = position_variance;
@@ -432,7 +624,10 @@ private:
       geometry_msgs::msg::TransformStamped transform;
       transform.header = odometry.header;
       transform.child_frame_id = base_frame_;
-      transform.transform.rotation = quaternion_message(orientation_);
+      transform.transform.translation.x = position_.x();
+      transform.transform.translation.y = position_.y();
+      transform.transform.translation.z = position_.z();
+      transform.transform.rotation = quaternion_message(published_orientation);
       transform_broadcaster_->sendTransform(transform);
     }
   }
@@ -449,10 +644,12 @@ private:
   bool static_override_ = false;
   bool quality_override_ = false;
   bool invert_yaw_ = true;
+  bool integrate_linear_acceleration_ = true;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
   bool has_previous_sample_ = false;
+  bool has_gravity_reference_ = false;
   int initialization_samples_ = 200;
   int startup_initialization_samples_ = 1000;
   int active_initialization_samples_ = 1000;
@@ -460,19 +657,38 @@ private:
   double gyro_deadband_rad_s_ = 0.005;
   double max_calibration_angular_speed_rad_s_ = 0.50;
   double max_calibration_gyro_stddev_rad_s_ = 0.03;
+  double max_calibration_accel_stddev_m_s2_ = 0.25;
   double max_imu_gap_sec_ = 0.25;
+  double acceleration_deadband_m_s2_ = 0.10;
+  double stationary_acceleration_threshold_m_s2_ = 0.20;
+  double stationary_gyro_threshold_rad_s_ = 0.03;
+  double stationary_hold_sec_ = 0.25;
+  double stationary_duration_sec_ = 0.0;
+  double gravity_adaptation_rate_ = 0.50;
+  double velocity_damping_per_sec_ = 0.05;
+  double max_linear_acceleration_m_s2_ = 15.0;
+  double max_linear_speed_m_s_ = 5.0;
   double unobserved_position_variance_ = 1.0e6;
   double static_position_variance_ = 0.01;
   double quality_override_position_variance_ = 0.01;
   double initial_orientation_variance_ = 0.01;
   double orientation_variance_ = 0.01;
   double angular_velocity_variance_ = 0.02;
+  double linear_acceleration_variance_ = 0.10;
+  double initial_inertial_position_variance_ = 0.25;
+  double position_variance_growth_per_sec_ = 0.25;
+  double position_variance_ = 0.25;
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion orientation_{tf2::Quaternion::getIdentity()};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_squared_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 acceleration_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 acceleration_squared_sum_{0.0, 0.0, 0.0};
+  tf2::Vector3 gravity_odom_{0.0, 0.0, 0.0};
+  tf2::Vector3 position_{0.0, 0.0, 0.0};
+  tf2::Vector3 linear_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_angular_velocity_{0.0, 0.0, 0.0};
   rclcpp::Time last_imu_stamp_{0, 0, RCL_ROS_TIME};
 

@@ -12,11 +12,14 @@ odom_node:
     # Bench-only mode: publish a fixed, calibrated origin pose with observed
     # position covariance. Disable before the robot can move.
     static_override: false
-    # Force unobserved gyro-only translation to look position-observed to
-    # consumers such as the iPhone app. This changes reported quality only.
+    # Force position confidence low enough for visualization clients regardless
+    # of inertial drift. This changes reported quality only.
     quality_override: false
-    # Match the robot's positive-yaw convention by reversing the mounted IMU Z rate.
+    # Match the robot convention by reversing published yaw without changing roll/pitch.
     invert_yaw: true
+    # Experimental IMU-only translation. This drives /odom XYZ for existing
+    # clients without app changes, but will drift without an external reference.
+    integrate_linear_acceleration: true
 
     gyro_deadband_rad_s: 0.005
     calibrate_on_startup: true
@@ -26,12 +29,21 @@ odom_node:
     # decided from sample variation so a stable sensor offset can be learned.
     max_calibration_angular_speed_rad_s: 0.50
     max_calibration_gyro_stddev_rad_s: 0.03
+    max_calibration_accel_stddev_m_s2: 0.25
     max_imu_gap_sec: 0.25
+    acceleration_deadband_m_s2: 0.10
+    stationary_acceleration_threshold_m_s2: 0.20
+    stationary_gyro_threshold_rad_s: 0.03
+    stationary_hold_sec: 0.25
+    gravity_adaptation_rate: 0.50
+    velocity_damping_per_sec: 0.05
+    max_linear_acceleration_m_s2: 15.0
+    max_linear_speed_m_s: 5.0
 
     # Rotation from the mounted IMU frame into base_link.
     imu_to_body_rotation_rpy: [0.0, 0.0, 0.0]
 
-    # Translation is intentionally unobserved until flow sensors are added.
+    # Used when acceleration integration is disabled.
     unobserved_position_variance: 1000000.0
     # Translation variance advertised only while static_override is active.
     static_position_variance: 0.01
@@ -39,3 +51,6 @@ odom_node:
     quality_override_position_variance: 0.01
     initial_orientation_variance: 0.01
     angular_velocity_variance: 0.02
+    linear_acceleration_variance: 0.10
+    initial_inertial_position_variance: 0.25
+    position_variance_growth_per_sec: 0.25
