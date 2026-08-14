@@ -24,7 +24,8 @@ estimate.
 The node rotates gyro samples from the mounted IMU frame into `base_link`, removes the stationary
 bias, applies a small noise deadband, and integrates the midpoint of consecutive angular-rate
 samples. It does not integrate across out-of-order timestamps or gaps longer than
-`max_imu_gap_sec`.
+`max_imu_gap_sec`. `invert_yaw` reverses the mounted IMU's Z angular rate before calibration and
+integration; it is enabled in the supplied configuration to match the robot yaw convention.
 
 Build and run it directly:
 

@@ -104,6 +104,7 @@ public:
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     static_override_ = declare_parameter<bool>("static_override", false);
     quality_override_ = declare_parameter<bool>("quality_override", false);
+    invert_yaw_ = declare_parameter<bool>("invert_yaw", true);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -215,11 +216,14 @@ private:
       return;
     }
 
-    const tf2::Vector3 raw_gyro = tf2::quatRotate(
+    const tf2::Vector3 mounted_gyro = tf2::quatRotate(
       imu_to_body_, tf2::Vector3(
         message->angular_velocity.x,
         message->angular_velocity.y,
         message->angular_velocity.z));
+    const tf2::Vector3 raw_gyro(
+      mounted_gyro.x(), mounted_gyro.y(),
+      invert_yaw_ ? -mounted_gyro.z() : mounted_gyro.z());
     if (!is_finite(raw_gyro)) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000, "Ignoring non-finite gyro sample");
@@ -444,6 +448,7 @@ private:
   bool publish_tf_ = true;
   bool static_override_ = false;
   bool quality_override_ = false;
+  bool invert_yaw_ = true;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
