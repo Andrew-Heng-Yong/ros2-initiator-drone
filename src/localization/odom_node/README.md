@@ -34,6 +34,12 @@ The getter is diagnostic only. `odom_node` performs its own stationary calibrati
 on every startup, learning current gyro bias, gravity direction, and accelerometer scale before it
 publishes odometry.
 
+Calibration also learns a leveling rotation from the stationary gravity direction. The node
+applies that rotation consistently to acceleration and gyro axes, so a stationary calibrated IMU
+reports approximately `[0, 0, -9.80665] m/s^2` even when the physical sensor is mounted at an
+angle. Relative odometry orientation still starts at identity; yaw remains defined by the startup
+heading because gravity cannot observe yaw.
+
 With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
 also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.
 This handles MPU-compatible boards whose effective range differs from register readback. Set

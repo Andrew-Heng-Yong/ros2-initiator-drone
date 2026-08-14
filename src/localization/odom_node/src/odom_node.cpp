@@ -25,6 +25,7 @@ namespace
 {
 
 constexpr double kSmallAngle = 1.0e-8;
+constexpr double kPi = 3.14159265358979323846;
 constexpr double kStandardGravity = 9.80665;
 constexpr double kMinimumUsableAccelerationMagnitude = 0.25;
 constexpr double kMaximumUsableAccelerationMagnitude = 50.0;
@@ -55,6 +56,32 @@ tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::
   quaternion.setRPY(rpy[0], rpy[1], rpy[2]);
   quaternion.normalize();
   return quaternion;
+}
+
+tf2::Quaternion rotation_between_vectors(
+  const tf2::Vector3 & source, const tf2::Vector3 & target)
+{
+  if (source.length() < kSmallAngle || target.length() < kSmallAngle) {
+    return tf2::Quaternion::getIdentity();
+  }
+  const tf2::Vector3 source_unit = source.normalized();
+  const tf2::Vector3 target_unit = target.normalized();
+  const double dot = std::clamp(source_unit.dot(target_unit), -1.0, 1.0);
+  if (dot > 1.0 - kSmallAngle) {
+    return tf2::Quaternion::getIdentity();
+  }
+  if (dot < -1.0 + kSmallAngle) {
+    tf2::Vector3 axis = source_unit.cross(tf2::Vector3(1.0, 0.0, 0.0));
+    if (axis.length() < kSmallAngle) {
+      axis = source_unit.cross(tf2::Vector3(0.0, 1.0, 0.0));
+    }
+    axis.normalize();
+    return tf2::Quaternion(axis, kPi);
+  }
+  const tf2::Vector3 cross = source_unit.cross(target_unit);
+  tf2::Quaternion rotation(cross.x(), cross.y(), cross.z(), 1.0 + dot);
+  rotation.normalize();
+  return rotation;
 }
 
 tf2::Quaternion delta_quaternion(const tf2::Vector3 & angular_velocity, double dt)
@@ -307,9 +334,12 @@ private:
     }
 
     const tf2::Vector3 angular_velocity =
-      apply_deadband(averaged_gyro - gyro_bias_, gyro_deadband_rad_s_);
+      apply_deadband(
+        tf2::quatRotate(calibration_alignment_, averaged_gyro - gyro_bias_),
+        gyro_deadband_rad_s_);
     const tf2::Vector3 calibrated_acceleration =
-      averaged_acceleration * acceleration_scale_factor_;
+      tf2::quatRotate(calibration_alignment_, averaged_acceleration) *
+      acceleration_scale_factor_;
     if (!has_previous_sample_) {
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
@@ -423,6 +453,7 @@ private:
     has_gravity_reference_ = false;
     acceleration_integration_available_ = integrate_linear_acceleration_;
     acceleration_scale_factor_ = 1.0;
+    calibration_alignment_ = tf2::Quaternion::getIdentity();
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
     position_variance_ = initial_inertial_position_variance_;
@@ -529,7 +560,11 @@ private:
       acceleration_integration_available_ = integrate_linear_acceleration_;
       acceleration_scale_factor_ = auto_scale_acceleration_ ?
         kStandardGravity / measured_acceleration_magnitude : 1.0;
-      gravity_odom_ = acceleration_mean * acceleration_scale_factor_;
+      const double calibrated_gravity_magnitude =
+        measured_acceleration_magnitude * acceleration_scale_factor_;
+      const tf2::Vector3 target_gravity(0.0, 0.0, -calibrated_gravity_magnitude);
+      calibration_alignment_ = rotation_between_vectors(acceleration_mean, target_gravity);
+      gravity_odom_ = target_gravity;
       has_gravity_reference_ = true;
       update_planar_basis();
       if (auto_scale_acceleration_ &&
@@ -544,7 +579,8 @@ private:
     }
 
     gyro_bias_ = gyro_mean;
-    previous_angular_velocity_ = apply_deadband(gyro - gyro_bias_, gyro_deadband_rad_s_);
+    previous_angular_velocity_ = apply_deadband(
+      tf2::quatRotate(calibration_alignment_, gyro - gyro_bias_), gyro_deadband_rad_s_);
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
     last_imu_stamp_ = stamp;
@@ -560,7 +596,9 @@ private:
       gravity_odom_.x(), gravity_odom_.y(), gravity_odom_.z(), maximum_gyro_stddev,
       maximum_acceleration_stddev);
     publish_outputs(
-      stamp, previous_angular_velocity_, linear_acceleration * acceleration_scale_factor_);
+      stamp, previous_angular_velocity_,
+      tf2::quatRotate(calibration_alignment_, linear_acceleration) *
+      acceleration_scale_factor_);
   }
 
   void initialize_gravity_reference(const tf2::Vector3 & linear_acceleration)
@@ -584,7 +622,7 @@ private:
       planar_y_axis_.setValue(0.0, 1.0, 0.0);
       return;
     }
-    const tf2::Vector3 vertical_axis = gravity_odom_.normalized();
+    const tf2::Vector3 vertical_axis = gravity_odom_.normalized() * -1.0;
     tf2::Vector3 forward_reference(1.0, 0.0, 0.0);
     if (std::abs(vertical_axis.dot(forward_reference)) > 0.90) {
       forward_reference.setValue(0.0, 1.0, 0.0);
@@ -790,6 +828,7 @@ private:
   double position_variance_ = 0.25;
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
+  tf2::Quaternion calibration_alignment_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion orientation_{tf2::Quaternion::getIdentity()};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
