@@ -29,6 +29,7 @@ odom_node:
     # decided from sample variation so a stable sensor offset can be learned.
     max_calibration_angular_speed_rad_s: 0.50
     max_calibration_gyro_stddev_rad_s: 0.03
+    # Warning threshold only. Accelerometer noise no longer blocks gyro calibration.
     max_calibration_accel_stddev_m_s2: 0.25
     max_imu_gap_sec: 0.25
     acceleration_deadband_m_s2: 0.10

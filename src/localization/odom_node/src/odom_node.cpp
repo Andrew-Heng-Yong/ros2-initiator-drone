@@ -381,6 +381,7 @@ private:
     gravity_odom_.setValue(0.0, 0.0, 0.0);
     stationary_duration_sec_ = 0.0;
     has_gravity_reference_ = false;
+    acceleration_integration_available_ = integrate_linear_acceleration_;
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
     position_variance_ = initial_inertial_position_variance_;
@@ -435,16 +436,25 @@ private:
     const double maximum_acceleration_stddev = std::sqrt(std::max(
       {acceleration_variance.x(), acceleration_variance.y(), acceleration_variance.z()}));
 
-    if (maximum_gyro_stddev > max_calibration_gyro_stddev_rad_s_ ||
-      maximum_acceleration_stddev > max_calibration_accel_stddev_m_s2_)
-    {
+    if (maximum_gyro_stddev > max_calibration_gyro_stddev_rad_s_) {
       RCLCPP_WARN(
         get_logger(),
-        "IMU moved during calibration (gyro stddev %.5f rad/s, accel stddev %.5f m/s^2); "
+        "IMU moved during calibration (gyro stddev %.5f rad/s); "
         "restarting the stationary sample window",
-        maximum_gyro_stddev, maximum_acceleration_stddev);
+        maximum_gyro_stddev);
       reset_calibration_window();
       return;
+    }
+
+    // Accelerometer vibration must not prevent orientation odometry from ever starting. It makes
+    // the gravity estimate less trustworthy, but averaging the full window is still preferable to
+    // repeatedly discarding an otherwise stationary gyro calibration.
+    if (maximum_acceleration_stddev > max_calibration_accel_stddev_m_s2_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Accelerometer was noisy during calibration (stddev %.5f m/s^2, warning limit "
+        "%.5f m/s^2); accepting the averaged gravity reference",
+        maximum_acceleration_stddev, max_calibration_accel_stddev_m_s2_);
     }
 
     // A stationary gyro can have a substantial constant zero-rate offset; that mean is exactly
@@ -461,21 +471,25 @@ private:
       return;
     }
 
-    if (acceleration_mean.length() < kMinimumGravityMagnitude ||
-      acceleration_mean.length() > kMaximumGravityMagnitude)
+    const double acceleration_magnitude = acceleration_mean.length();
+    if (acceleration_magnitude < kMinimumGravityMagnitude ||
+      acceleration_magnitude > kMaximumGravityMagnitude)
     {
-      RCLCPP_WARN(
+      RCLCPP_ERROR(
         get_logger(),
         "Acceleration magnitude %.4f m/s^2 is outside the gravity sanity range; "
-        "restarting the stationary sample window",
-        acceleration_mean.length());
-      reset_calibration_window();
-      return;
+        "disabling inertial position integration but continuing orientation odometry",
+        acceleration_magnitude);
+      acceleration_integration_available_ = false;
+      gravity_odom_.setValue(0.0, 0.0, 0.0);
+      has_gravity_reference_ = false;
+    } else {
+      acceleration_integration_available_ = integrate_linear_acceleration_;
+      gravity_odom_ = acceleration_mean;
+      has_gravity_reference_ = true;
     }
 
     gyro_bias_ = gyro_mean;
-    gravity_odom_ = acceleration_mean;
-    has_gravity_reference_ = acceleration_mean.length() > kSmallAngle;
     previous_angular_velocity_ = apply_deadband(gyro - gyro_bias_, gyro_deadband_rad_s_);
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
@@ -496,7 +510,9 @@ private:
 
   void initialize_gravity_reference(const tf2::Vector3 & linear_acceleration)
   {
-    if (has_gravity_reference_ || !integrate_linear_acceleration_) {
+    if (has_gravity_reference_ || !integrate_linear_acceleration_ ||
+      !acceleration_integration_available_)
+    {
       return;
     }
     const tf2::Quaternion published_orientation =
@@ -509,7 +525,7 @@ private:
     const tf2::Vector3 & linear_acceleration, const tf2::Vector3 & angular_velocity,
     double dt)
   {
-    if (!integrate_linear_acceleration_) {
+    if (!integrate_linear_acceleration_ || !acceleration_integration_available_) {
       return;
     }
     initialize_gravity_reference(linear_acceleration);
@@ -605,7 +621,8 @@ private:
     // old unobserved-position contract.
     const double position_variance = static_pose ? static_position_variance_ :
       (quality_override_ ? quality_override_position_variance_ :
-      (integrate_linear_acceleration_ ? position_variance_ : unobserved_position_variance_));
+      (integrate_linear_acceleration_ && acceleration_integration_available_ ?
+      position_variance_ : unobserved_position_variance_));
     odometry.pose.covariance[0] = position_variance;
     odometry.pose.covariance[7] = position_variance;
     odometry.pose.covariance[14] = position_variance;
@@ -650,6 +667,7 @@ private:
   bool initialized_ = false;
   bool has_previous_sample_ = false;
   bool has_gravity_reference_ = false;
+  bool acceleration_integration_available_ = true;
   int initialization_samples_ = 200;
   int startup_initialization_samples_ = 1000;
   int active_initialization_samples_ = 1000;

@@ -64,10 +64,13 @@ ros2 launch drone_control drone_launch.py \
 ```
 
 Keep the drone stationary while the first `startup_initialization_samples` messages arrive. Gyro
-and accelerometer sample standard deviations reject a window with movement. Their means establish
-the stationary gyro bias and gravity reference. Calibration state is transient-local on
-`/odom/calibrated` and is also republished once per second so rosbridge clients that connect after
-startup still receive it. Recalibration resets pose and velocity to the odom origin.
+sample variation rejects a window with movement. Accelerometer variation produces a warning but
+does not block gyro calibration; its window mean establishes the gravity reference. If that mean
+is outside the gravity sanity range, the node continues with orientation odometry and disables
+inertial position integration instead of remaining uncalibrated. Calibration state is
+transient-local on `/odom/calibrated` and is also republished once per second so rosbridge clients
+that connect after startup still receive it. Recalibration resets pose and velocity to the odom
+origin.
 
 Request recalibration while the drone is stationary:
 
