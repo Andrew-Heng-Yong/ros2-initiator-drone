@@ -19,6 +19,11 @@ gyro bias and noise:
 ros2 run odom_node imu_calibration_getter.py
 ```
 
+The MPU driver must already be publishing. Check it with `ros2 topic info /imu/data_raw` and
+`ros2 topic hz /imu/data_raw`. If no publisher exists, start the IMU-only graph in another sourced
+terminal with `ros2 launch drone_control drone_launch.py start_imu:=true start_odom:=false`.
+Do not start a second MPU driver when the dashboard launch already owns the I2C device.
+
 Use `--topic`, `--samples`, or `--timeout` to override its defaults. For example:
 
 ```bash

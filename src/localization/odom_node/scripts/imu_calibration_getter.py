@@ -148,9 +148,23 @@ def main(argv=None):
         if node.finished:
             print(node.result_text(), flush=True)
         else:
+            publisher_count = node.count_publishers(arguments.topic)
+            if node.invalid_samples:
+                reason = f'all {node.invalid_samples} received messages contained non-finite data'
+            elif publisher_count == 0:
+                reason = (
+                    'no publisher was discovered; start mpu6050_node and verify that this shell '
+                    'uses the same ROS_DOMAIN_ID as the launch process'
+                )
+            else:
+                reason = (
+                    f'{publisher_count} publisher(s) were discovered but no compatible Imu '
+                    'messages arrived; inspect the topic type and QoS'
+                )
             node.get_logger().error(
                 f'Timed out after {arguments.timeout:.1f}s with '
-                f'{node.stats.count}/{arguments.samples} valid samples from {arguments.topic}')
+                f'{node.stats.count}/{arguments.samples} valid samples from {arguments.topic}: '
+                f'{reason}')
             exit_code = 1
     except KeyboardInterrupt:
         node.get_logger().warning(
