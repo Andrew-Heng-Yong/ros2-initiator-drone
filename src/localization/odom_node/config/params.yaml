@@ -26,10 +26,10 @@ odom_node:
     auto_scale_acceleration: true
     # Paste values printed by imu_calibration_getter.py here, then set this to
     # true to start immediately without repeating the 1000-sample calibration.
-    use_saved_calibration: false
-    saved_raw_gyro_bias_rad_s: [0.0, 0.0, 0.0]
-    saved_raw_acceleration_mean_m_s2: [0.0, 0.0, 9.80665]
-    saved_acceleration_scale_factor: 1.0
+    use_saved_calibration: true
+    saved_raw_gyro_bias_rad_s: [-0.13354500, -0.04482045, -0.04898113]
+    saved_raw_acceleration_mean_m_s2: [0.42204867, -0.43081744, -2.19518484]
+    saved_acceleration_scale_factor: 4.30772813
     # Smooth both gyro and acceleration with a rolling mean while retaining the
     # original publication rate. Ten reads add about 45 ms mean delay at 100 Hz.
     imu_average_window_size: 10
