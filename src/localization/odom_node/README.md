@@ -36,9 +36,15 @@ publishes odometry.
 
 Calibration also learns a leveling rotation from the stationary gravity direction. The node
 applies that rotation consistently to acceleration and gyro axes, so a stationary calibrated IMU
-reports approximately `[0, 0, -9.80665] m/s^2` even when the physical sensor is mounted at an
-angle. Relative odometry orientation still starts at identity; yaw remains defined by the startup
-heading because gravity cannot observe yaw.
+reports approximately `[0, 0, +9.80665] m/s^2` even when the physical sensor is mounted at an
+angle. The sign follows `sensor_msgs/Imu`: an accelerometer measures specific force, so at rest
+it reads `+g` along the frame's up axis, not `-g`. Relative odometry orientation still starts at
+identity; yaw remains defined by the startup heading because gravity cannot observe yaw.
+
+Levelling therefore corrects tilt only. It cannot correct how the board is rotated *about*
+gravity, so an IMU that is not mounted with its `+X` forward and `+Y` left needs that mounting
+rotation declared in `imu_to_body_rotation_rpy`; otherwise roll, pitch, and yaw come out swapped
+or mirrored no matter how well the node is calibrated.
 
 With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
 also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.

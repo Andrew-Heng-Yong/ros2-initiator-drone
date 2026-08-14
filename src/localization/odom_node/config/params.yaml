@@ -45,7 +45,13 @@ odom_node:
     max_linear_speed_m_s: 5.0
 
     # Rotation from the mounted IMU frame into base_link.
-    imu_to_body_rotation_rpy: [0.0, 0.0, 0.0]
+    # The MPU6050 is mounted upside down: a stationary /imu/data_raw reads
+    # [0, 0, -9.8], so the board's +Z points at the floor. A 180 degree roll
+    # puts its axes back on base_link (x forward, y left, z up). Without this
+    # the gyro's pitch and yaw arrive negated, which is why lifting the robot's
+    # head made the app pitch the model down. Levelling cannot recover this on
+    # its own: gravity fixes tilt, never heading about gravity.
+    imu_to_body_rotation_rpy: [3.14159265358979, 0.0, 0.0]
 
     # Used when acceleration integration is disabled.
     unobserved_position_variance: 1000000.0

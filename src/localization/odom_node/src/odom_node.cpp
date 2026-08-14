@@ -543,9 +543,15 @@ private:
         kStandardGravity / measured_acceleration_magnitude : 1.0;
       const double calibrated_gravity_magnitude =
         measured_acceleration_magnitude * acceleration_scale_factor_;
-      const tf2::Vector3 target_gravity(0.0, 0.0, -calibrated_gravity_magnitude);
-      calibration_alignment_ = rotation_between_vectors(acceleration_mean, target_gravity);
-      gravity_odom_ = target_gravity;
+      // An accelerometer measures specific force, not gravity: at rest it reads +g along the
+      // frame's up axis (REP-145), so a levelled base_link reads [0, 0, +g]. Levelling onto
+      // -Z instead turns every normally mounted IMU into a 180 degree rotation about Y, which
+      // silently mirrors two of the three gyro axes. This is also the value
+      // `initialize_gravity_reference` stores, and the two must agree.
+      const tf2::Vector3 stationary_specific_force(0.0, 0.0, calibrated_gravity_magnitude);
+      calibration_alignment_ =
+        rotation_between_vectors(acceleration_mean, stationary_specific_force);
+      gravity_odom_ = stationary_specific_force;
       has_gravity_reference_ = true;
       if (auto_scale_acceleration_ &&
         std::abs(acceleration_scale_factor_ - 1.0) > 0.05)
