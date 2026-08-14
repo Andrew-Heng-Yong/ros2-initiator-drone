@@ -21,6 +21,15 @@ odom_node:
     # Ground-robot constraint: prevent gravity error from integrating into
     # runaway vertical position. Disable only when genuine Z motion is required.
     planar_translation: true
+    # Learn accelerometer gain from stationary gravity. This also handles
+    # MPU-compatible boards whose effective range differs from readback.
+    auto_scale_acceleration: true
+    # Paste values printed by imu_calibration_getter.py here, then set this to
+    # true to start immediately without repeating the 1000-sample calibration.
+    use_saved_calibration: false
+    saved_raw_gyro_bias_rad_s: [0.0, 0.0, 0.0]
+    saved_raw_acceleration_mean_m_s2: [0.0, 0.0, 9.80665]
+    saved_acceleration_scale_factor: 1.0
 
     gyro_deadband_rad_s: 0.005
     calibrate_on_startup: true

@@ -24,8 +24,9 @@ namespace
 {
 
 constexpr double kSmallAngle = 1.0e-8;
-constexpr double kMinimumGravityMagnitude = 5.0;
-constexpr double kMaximumGravityMagnitude = 15.0;
+constexpr double kStandardGravity = 9.80665;
+constexpr double kMinimumUsableAccelerationMagnitude = 0.25;
+constexpr double kMaximumUsableAccelerationMagnitude = 50.0;
 
 tf2::Vector3 apply_deadband(const tf2::Vector3 & value, double threshold)
 {
@@ -53,6 +54,14 @@ tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::
   quaternion.setRPY(rpy[0], rpy[1], rpy[2]);
   quaternion.normalize();
   return quaternion;
+}
+
+tf2::Vector3 vector_from_xyz(const std::vector<double> & xyz, const std::string & name)
+{
+  if (xyz.size() != 3U) {
+    throw std::invalid_argument(name + " must contain X, Y, and Z");
+  }
+  return tf2::Vector3(xyz[0], xyz[1], xyz[2]);
 }
 
 tf2::Quaternion delta_quaternion(const tf2::Vector3 & angular_velocity, double dt)
@@ -118,6 +127,18 @@ public:
     integrate_linear_acceleration_ =
       declare_parameter<bool>("integrate_linear_acceleration", true);
     planar_translation_ = declare_parameter<bool>("planar_translation", true);
+    auto_scale_acceleration_ = declare_parameter<bool>("auto_scale_acceleration", true);
+    use_saved_calibration_ = declare_parameter<bool>("use_saved_calibration", false);
+    saved_raw_gyro_bias_ = vector_from_xyz(
+      declare_parameter<std::vector<double>>(
+        "saved_raw_gyro_bias_rad_s", {0.0, 0.0, 0.0}),
+      "saved_raw_gyro_bias_rad_s");
+    saved_raw_acceleration_mean_ = vector_from_xyz(
+      declare_parameter<std::vector<double>>(
+        "saved_raw_acceleration_mean_m_s2", {0.0, 0.0, 9.80665}),
+      "saved_raw_acceleration_mean_m_s2");
+    saved_acceleration_scale_factor_ =
+      declare_parameter<double>("saved_acceleration_scale_factor", 1.0);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
     calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
@@ -201,6 +222,22 @@ public:
         get_logger(),
         "Odometry static override active: calibration and IMU integration are disabled; "
         "publishing a fixed calibrated pose at the origin");
+    } else if (use_saved_calibration_) {
+      gyro_bias_ = tf2::quatRotate(imu_to_body_, saved_raw_gyro_bias_);
+      acceleration_scale_factor_ = saved_acceleration_scale_factor_;
+      gravity_odom_ = tf2::quatRotate(
+        imu_to_body_, saved_raw_acceleration_mean_) * acceleration_scale_factor_;
+      has_gravity_reference_ = integrate_linear_acceleration_;
+      acceleration_integration_available_ = integrate_linear_acceleration_;
+      update_planar_basis();
+      initialized_ = true;
+      publish_calibration_status(true);
+      RCLCPP_INFO(
+        get_logger(),
+        "Loaded saved IMU calibration: gyro bias [%.6f %.6f %.6f] rad/s, "
+        "acceleration scale %.6f, gravity [%.4f %.4f %.4f] m/s^2",
+        gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(), acceleration_scale_factor_,
+        gravity_odom_.x(), gravity_odom_.y(), gravity_odom_.z());
     } else if (calibrate_on_startup_) {
       reset_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
@@ -260,6 +297,14 @@ private:
     {
       throw std::invalid_argument("invalid gyro odometry parameters");
     }
+    if (use_saved_calibration_ &&
+      (!is_finite(saved_raw_gyro_bias_) || !is_finite(saved_raw_acceleration_mean_) ||
+      !std::isfinite(saved_acceleration_scale_factor_) ||
+      saved_acceleration_scale_factor_ <= 0.0 ||
+      saved_raw_acceleration_mean_.length() < kMinimumUsableAccelerationMagnitude))
+    {
+      throw std::invalid_argument("invalid saved IMU calibration parameters");
+    }
   }
 
   void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr & message)
@@ -301,12 +346,14 @@ private:
 
     const tf2::Vector3 angular_velocity =
       apply_deadband(raw_gyro - gyro_bias_, gyro_deadband_rad_s_);
+    const tf2::Vector3 calibrated_acceleration =
+      mounted_acceleration * acceleration_scale_factor_;
     if (!has_previous_sample_) {
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
       has_previous_sample_ = true;
-      initialize_gravity_reference(mounted_acceleration);
-      publish_outputs(stamp, angular_velocity, mounted_acceleration);
+      initialize_gravity_reference(calibrated_acceleration);
+      publish_outputs(stamp, angular_velocity, calibrated_acceleration);
       return;
     }
 
@@ -326,7 +373,7 @@ private:
       orientation_ = orientation_ * delta_quaternion(midpoint_angular_velocity, dt);
       orientation_.normalize();
       orientation_variance_ += angular_velocity_variance_ * dt * dt;
-      integrate_translation(mounted_acceleration, angular_velocity, dt);
+      integrate_translation(calibrated_acceleration, angular_velocity, dt);
     } else {
       linear_velocity_.setValue(0.0, 0.0, 0.0);
       filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
@@ -339,7 +386,7 @@ private:
 
     previous_angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
-    publish_outputs(stamp, angular_velocity, mounted_acceleration);
+    publish_outputs(stamp, angular_velocity, calibrated_acceleration);
   }
 
   void start_calibration(const std::shared_ptr<std_srvs::srv::Trigger::Response> & response)
@@ -378,6 +425,7 @@ private:
     stationary_duration_sec_ = 0.0;
     has_gravity_reference_ = false;
     acceleration_integration_available_ = integrate_linear_acceleration_;
+    acceleration_scale_factor_ = 1.0;
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
     position_variance_ = initial_inertial_position_variance_;
@@ -467,23 +515,35 @@ private:
       return;
     }
 
-    const double acceleration_magnitude = acceleration_mean.length();
-    if (acceleration_magnitude < kMinimumGravityMagnitude ||
-      acceleration_magnitude > kMaximumGravityMagnitude)
+    const double measured_acceleration_magnitude = acceleration_mean.length();
+    if (measured_acceleration_magnitude < kMinimumUsableAccelerationMagnitude ||
+      measured_acceleration_magnitude > kMaximumUsableAccelerationMagnitude)
     {
       RCLCPP_ERROR(
         get_logger(),
         "Acceleration magnitude %.4f m/s^2 is outside the gravity sanity range; "
         "disabling inertial position integration but continuing orientation odometry",
-        acceleration_magnitude);
+        measured_acceleration_magnitude);
       acceleration_integration_available_ = false;
+      acceleration_scale_factor_ = 1.0;
       gravity_odom_.setValue(0.0, 0.0, 0.0);
       has_gravity_reference_ = false;
     } else {
       acceleration_integration_available_ = integrate_linear_acceleration_;
-      gravity_odom_ = acceleration_mean;
+      acceleration_scale_factor_ = auto_scale_acceleration_ ?
+        kStandardGravity / measured_acceleration_magnitude : 1.0;
+      gravity_odom_ = acceleration_mean * acceleration_scale_factor_;
       has_gravity_reference_ = true;
       update_planar_basis();
+      if (auto_scale_acceleration_ &&
+        std::abs(acceleration_scale_factor_ - 1.0) > 0.05)
+      {
+        RCLCPP_WARN(
+          get_logger(),
+          "Stationary acceleration measured %.4f m/s^2; applying scale %.5f so gravity "
+          "and translation use SI acceleration",
+          measured_acceleration_magnitude, acceleration_scale_factor_);
+      }
     }
 
     gyro_bias_ = gyro_mean;
@@ -502,7 +562,8 @@ private:
       initialization_count_, gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(),
       gravity_odom_.x(), gravity_odom_.y(), gravity_odom_.z(), maximum_gyro_stddev,
       maximum_acceleration_stddev);
-    publish_outputs(stamp, previous_angular_velocity_, linear_acceleration);
+    publish_outputs(
+      stamp, previous_angular_velocity_, linear_acceleration * acceleration_scale_factor_);
   }
 
   void initialize_gravity_reference(const tf2::Vector3 & linear_acceleration)
@@ -693,6 +754,8 @@ private:
   bool quality_override_ = false;
   bool integrate_linear_acceleration_ = true;
   bool planar_translation_ = true;
+  bool auto_scale_acceleration_ = true;
+  bool use_saved_calibration_ = false;
   bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
@@ -718,6 +781,8 @@ private:
   double velocity_damping_per_sec_ = 0.05;
   double max_linear_acceleration_m_s2_ = 15.0;
   double max_linear_speed_m_s_ = 5.0;
+  double acceleration_scale_factor_ = 1.0;
+  double saved_acceleration_scale_factor_ = 1.0;
   double unobserved_position_variance_ = 1.0e6;
   double static_position_variance_ = 0.01;
   double quality_override_position_variance_ = 0.01;
@@ -731,6 +796,8 @@ private:
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion orientation_{tf2::Quaternion::getIdentity()};
+  tf2::Vector3 saved_raw_gyro_bias_{0.0, 0.0, 0.0};
+  tf2::Vector3 saved_raw_acceleration_mean_{0.0, 0.0, 9.80665};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_squared_sum_{0.0, 0.0, 0.0};

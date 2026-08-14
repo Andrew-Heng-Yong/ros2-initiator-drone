@@ -26,6 +26,7 @@ ament_target_dependencies(
   tf2_ros)
 
 install(TARGETS odom_node DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/imu_calibration_getter.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 install(FILES README.md DESTINATION share/${PROJECT_NAME})
 

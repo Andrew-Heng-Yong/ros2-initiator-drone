@@ -72,8 +72,11 @@ ros2 launch drone_control drone_launch.py \
 ros2 topic echo /odom
 ```
 
-The node consumes only `/imu/data_raw`. It publishes completion on `/odom/calibrated` once per
-second (with transient-local durability for native ROS subscribers) and publishes
+The node consumes only `/imu/data_raw`. Its stationary calibration normalizes the measured
+acceleration magnitude to standard gravity, allowing integration to work with MPU-compatible
+boards whose effective acceleration scale differs from register readback. It publishes completion
+on `/odom/calibrated` once per second (with transient-local durability for native ROS subscribers)
+and publishes
 bias-corrected gyro values, integrated relative orientation, and diagnostic acceleration on
 `/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
 acceleration into `/odom` velocity and position, with stationary zero-velocity resets. Translation

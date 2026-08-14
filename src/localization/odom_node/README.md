@@ -5,10 +5,36 @@ while the drone is stationary, and publishes relative pose and velocity as
 `nav_msgs/msg/Odometry` on `/odom`. It also broadcasts `odom -> base_link` unless `publish_tf` is
 disabled.
 
-With the supplied `integrate_linear_acceleration: true` configuration, mounted acceleration is
-rotated into `odom`, the calibrated gravity reference is removed, and the remainder is integrated
-into velocity and position. Deadbanding, velocity damping and limits, and a stationary
-zero-velocity update constrain obvious runaway. `planar_translation: true` projects acceleration
+To inspect the stationary IMU calibration independently, run the included Python sampler while
+the robot is completely still. It collects exactly 1,000 valid samples by default and reports the
+raw acceleration mean and noise, measured gravity magnitude, odometry acceleration scale, and
+gyro bias and noise:
+
+```bash
+ros2 run odom_node imu_calibration_getter.py
+```
+
+Use `--topic`, `--samples`, or `--timeout` to override its defaults. For example:
+
+```bash
+ros2 run odom_node imu_calibration_getter.py --samples 1000 --timeout 30
+```
+
+To use the measurements, hand-fill `saved_raw_gyro_bias_rad_s` from `gyro_bias_rad_s`,
+`saved_raw_acceleration_mean_m_s2` from `acceleration_mean_m_s2`, and
+`saved_acceleration_scale_factor` from `odom_acceleration_scale_factor` in `params.yaml`, then set
+`use_saved_calibration: true`. With saved calibration enabled, the node starts immediately instead
+of running its own startup sample window. Set it back to `false` whenever the IMU mounting or
+sensor changes.
+
+With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
+also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.
+This handles MPU-compatible boards whose effective range differs from register readback. Set
+`auto_scale_acceleration: false` only when the IMU's SI scale is already known to be accurate.
+Mounted acceleration is then rotated into `odom`, the calibrated gravity reference is removed,
+and the remainder is integrated into velocity and position. Deadbanding, velocity damping and
+limits, and a stationary zero-velocity update constrain obvious runaway.
+`planar_translation: true` projects acceleration
 onto the plane perpendicular to the calibrated gravity vector, maps that plane onto odom X/Y, and
 locks Z velocity and position to zero. This remains responsive when the physical IMU Z axis is not
 the robot's vertical axis. It also prevents a small gravity error from integrating into a vertical
