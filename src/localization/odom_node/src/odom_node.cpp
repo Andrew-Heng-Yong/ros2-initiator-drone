@@ -57,14 +57,6 @@ tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::
   return quaternion;
 }
 
-tf2::Vector3 vector_from_xyz(const std::vector<double> & xyz, const std::string & name)
-{
-  if (xyz.size() != 3U) {
-    throw std::invalid_argument(name + " must contain X, Y, and Z");
-  }
-  return tf2::Vector3(xyz[0], xyz[1], xyz[2]);
-}
-
 tf2::Quaternion delta_quaternion(const tf2::Vector3 & angular_velocity, double dt)
 {
   const double angle = angular_velocity.length() * dt;
@@ -129,21 +121,9 @@ public:
       declare_parameter<bool>("integrate_linear_acceleration", true);
     planar_translation_ = declare_parameter<bool>("planar_translation", true);
     auto_scale_acceleration_ = declare_parameter<bool>("auto_scale_acceleration", true);
-    use_saved_calibration_ = declare_parameter<bool>("use_saved_calibration", false);
-    saved_raw_gyro_bias_ = vector_from_xyz(
-      declare_parameter<std::vector<double>>(
-        "saved_raw_gyro_bias_rad_s", {0.0, 0.0, 0.0}),
-      "saved_raw_gyro_bias_rad_s");
-    saved_raw_acceleration_mean_ = vector_from_xyz(
-      declare_parameter<std::vector<double>>(
-        "saved_raw_acceleration_mean_m_s2", {0.0, 0.0, 9.80665}),
-      "saved_raw_acceleration_mean_m_s2");
-    saved_acceleration_scale_factor_ =
-      declare_parameter<double>("saved_acceleration_scale_factor", 1.0);
     imu_average_window_size_ = declare_parameter<int>("imu_average_window_size", 10);
 
     gyro_deadband_rad_s_ = declare_parameter<double>("gyro_deadband_rad_s", 0.005);
-    calibrate_on_startup_ = declare_parameter<bool>("calibrate_on_startup", true);
     initialization_samples_ = declare_parameter<int>("initialization_samples", 200);
     startup_initialization_samples_ =
       declare_parameter<int>("startup_initialization_samples", 1000);
@@ -224,34 +204,12 @@ public:
         get_logger(),
         "Odometry static override active: calibration and IMU integration are disabled; "
         "publishing a fixed calibrated pose at the origin");
-    } else if (use_saved_calibration_) {
-      gyro_bias_ = tf2::quatRotate(imu_to_body_, saved_raw_gyro_bias_);
-      acceleration_scale_factor_ = saved_acceleration_scale_factor_;
-      gravity_odom_ = tf2::quatRotate(
-        imu_to_body_, saved_raw_acceleration_mean_) * acceleration_scale_factor_;
-      has_gravity_reference_ = integrate_linear_acceleration_;
-      acceleration_integration_available_ = integrate_linear_acceleration_;
-      update_planar_basis();
-      initialized_ = true;
-      publish_calibration_status(true);
-      RCLCPP_INFO(
-        get_logger(),
-        "Loaded saved IMU calibration: gyro bias [%.6f %.6f %.6f] rad/s, "
-        "acceleration scale %.6f, gravity [%.4f %.4f %.4f] m/s^2",
-        gyro_bias_.x(), gyro_bias_.y(), gyro_bias_.z(), acceleration_scale_factor_,
-        gravity_odom_.x(), gravity_odom_.y(), gravity_odom_.z());
-    } else if (calibrate_on_startup_) {
+    } else {
       reset_for_calibration(startup_initialization_samples_);
       RCLCPP_INFO(
         get_logger(),
         "IMU calibration started (%d stationary samples); imu=%s output=%s",
         active_initialization_samples_, imu_topic_.c_str(), odom_topic_.c_str());
-    } else {
-      initialized_ = true;
-      publish_calibration_status(true);
-      RCLCPP_WARN(
-        get_logger(),
-        "Startup gyro calibration is disabled; using zero bias and identity orientation");
     }
     if (quality_override_ && !static_override_) {
       RCLCPP_WARN(
@@ -301,14 +259,6 @@ private:
       initial_inertial_position_variance_ < 0.0 || position_variance_growth_per_sec_ < 0.0)
     {
       throw std::invalid_argument("invalid gyro odometry parameters");
-    }
-    if (use_saved_calibration_ &&
-      (!is_finite(saved_raw_gyro_bias_) || !is_finite(saved_raw_acceleration_mean_) ||
-      !std::isfinite(saved_acceleration_scale_factor_) ||
-      saved_acceleration_scale_factor_ <= 0.0 ||
-      saved_raw_acceleration_mean_.length() < kMinimumUsableAccelerationMagnitude))
-    {
-      throw std::invalid_argument("invalid saved IMU calibration parameters");
     }
   }
 
@@ -802,8 +752,6 @@ private:
   bool integrate_linear_acceleration_ = true;
   bool planar_translation_ = true;
   bool auto_scale_acceleration_ = true;
-  bool use_saved_calibration_ = false;
-  bool calibrate_on_startup_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
   bool has_previous_sample_ = false;
@@ -830,7 +778,6 @@ private:
   double max_linear_acceleration_m_s2_ = 15.0;
   double max_linear_speed_m_s_ = 5.0;
   double acceleration_scale_factor_ = 1.0;
-  double saved_acceleration_scale_factor_ = 1.0;
   double unobserved_position_variance_ = 1.0e6;
   double static_position_variance_ = 0.01;
   double quality_override_position_variance_ = 0.01;
@@ -844,8 +791,6 @@ private:
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion orientation_{tf2::Quaternion::getIdentity()};
-  tf2::Vector3 saved_raw_gyro_bias_{0.0, 0.0, 0.0};
-  tf2::Vector3 saved_raw_acceleration_mean_{0.0, 0.0, 9.80665};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_squared_sum_{0.0, 0.0, 0.0};

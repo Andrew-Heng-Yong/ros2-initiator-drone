@@ -30,12 +30,9 @@ Use `--topic`, `--samples`, or `--timeout` to override its defaults. For example
 ros2 run odom_node imu_calibration_getter.py --samples 1000 --timeout 30
 ```
 
-To use the measurements, hand-fill `saved_raw_gyro_bias_rad_s` from `gyro_bias_rad_s`,
-`saved_raw_acceleration_mean_m_s2` from `acceleration_mean_m_s2`, and
-`saved_acceleration_scale_factor` from `odom_acceleration_scale_factor` in `params.yaml`, then set
-`use_saved_calibration: true`. With saved calibration enabled, the node starts immediately instead
-of running its own startup sample window. Set it back to `false` whenever the IMU mounting or
-sensor changes.
+The getter is diagnostic only. `odom_node` performs its own stationary calibration automatically
+on every startup, learning current gyro bias, gravity direction, and accelerometer scale before it
+publishes odometry.
 
 With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
 also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.
