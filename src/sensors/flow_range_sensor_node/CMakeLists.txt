@@ -25,19 +25,27 @@ target_include_directories(flow_range_drivers PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-add_executable(flow_range_sensor_node src/flow_range_sensor_node.cpp)
-target_compile_features(flow_range_sensor_node PUBLIC cxx_std_17)
-target_compile_options(flow_range_sensor_node PRIVATE -Wall -Wextra -Wpedantic)
-target_link_libraries(flow_range_sensor_node flow_range_drivers)
-ament_target_dependencies(flow_range_sensor_node diagnostic_msgs rclcpp sensor_msgs)
+add_executable(flow_range_sensor_node_executable src/flow_range_sensor_node.cpp)
+set_target_properties(flow_range_sensor_node_executable PROPERTIES
+  OUTPUT_NAME flow_range_sensor_node
+)
+target_compile_features(flow_range_sensor_node_executable PUBLIC cxx_std_17)
+target_compile_options(flow_range_sensor_node_executable PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(flow_range_sensor_node_executable flow_range_drivers)
+ament_target_dependencies(
+  flow_range_sensor_node_executable
+  diagnostic_msgs
+  rclcpp
+  sensor_msgs
+)
 
 rosidl_get_typesupport_target(cpp_typesupport_target
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
-target_link_libraries(flow_range_sensor_node "${cpp_typesupport_target}")
+target_link_libraries(flow_range_sensor_node_executable "${cpp_typesupport_target}")
 
 install(TARGETS
   flow_range_drivers
-  flow_range_sensor_node
+  flow_range_sensor_node_executable
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
