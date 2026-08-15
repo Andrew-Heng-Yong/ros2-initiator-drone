@@ -148,8 +148,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'start_rosbridge',
-            default_value='false',
-            description='Start rosbridge websocket on port 9090 for the frontend.',
+            default_value='true',
+            description='Start rosbridge websocket on port 9090 for the frontend (enabled by default).',
         ),
         DeclareLaunchArgument(
             'start_depth_camera',
@@ -158,8 +158,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'start_odom',
-            default_value='false',
-            description='Start gyro odometry and its IMU input.',
+            default_value='true',
+            description='Start fused odometry and its sensor inputs (enabled by default).',
         ),
         DeclareLaunchArgument(
             'start_imu',
