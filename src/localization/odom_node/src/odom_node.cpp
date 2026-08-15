@@ -180,6 +180,8 @@ public:
     maximum_flow_shutter_ = declare_parameter<int>("maximum_flow_shutter", 7999);
     flow_radians_per_count_ = declare_parameter<double>("flow_radians_per_count", 0.0025);
     flow_velocity_gain_ = declare_parameter<double>("flow_velocity_gain", 0.65);
+    flow_rotation_compensation_gain_ =
+      declare_parameter<double>("flow_rotation_compensation_gain", 1.0);
     flow_timeout_sec_ = declare_parameter<double>("flow_timeout_sec", 0.20);
     max_flow_angular_speed_rad_s_ =
       declare_parameter<double>("max_flow_angular_speed_rad_s", 0.50);
@@ -332,7 +334,8 @@ private:
       minimum_flow_quality_ < 0 || minimum_flow_quality_ > 255 ||
       maximum_flow_shutter_ < 0 || maximum_flow_shutter_ > 8191 ||
       flow_radians_per_count_ <= 0.0 || flow_velocity_gain_ < 0.0 ||
-      flow_velocity_gain_ > 1.0 || flow_timeout_sec_ <= 0.0 ||
+      flow_velocity_gain_ > 1.0 || flow_rotation_compensation_gain_ < 0.0 ||
+      flow_rotation_compensation_gain_ > 2.0 || flow_timeout_sec_ <= 0.0 ||
       max_flow_angular_speed_rad_s_ <= 0.0 || max_flow_linear_speed_m_s_ <= 0.0 ||
       flow_to_body_matrix_.size() != 4U || range_position_gain_ < 0.0 ||
       range_position_gain_ > 1.0 || range_velocity_gain_ < 0.0 ||
@@ -388,17 +391,35 @@ private:
       static_cast<double>(message->delta_x) : 0.0;
     const double delta_y = message->motion_detected ?
       static_cast<double>(message->delta_y) : 0.0;
-    const tf2::Vector3 velocity_body(
+    tf2::Vector3 velocity_body(
       count_to_velocity *
       (flow_to_body_matrix_[0] * delta_x + flow_to_body_matrix_[1] * delta_y),
       count_to_velocity *
       (flow_to_body_matrix_[2] * delta_x + flow_to_body_matrix_[3] * delta_y),
       0.0);
+    if (message->motion_detected) {
+      // A downward camera interprets roll/pitch rotation over a flat floor as translation.
+      // Remove that image-motion component in base_link before rotating the measured velocity
+      // into odom. Yaw rotates the image about its center and has no single translational term.
+      const double ground_distance = static_cast<double>(message->ground_distance);
+      velocity_body += tf2::Vector3(
+        ground_distance * latest_angular_velocity_.y(),
+        -ground_distance * latest_angular_velocity_.x(), 0.0) *
+        flow_rotation_compensation_gain_;
+    }
     if (!is_finite(velocity_body) || velocity_body.length() > max_flow_linear_speed_m_s_) {
       return;
     }
 
     const tf2::Vector3 velocity_odom = tf2::quatRotate(orientation_, velocity_body);
+    if (!integrate_linear_acceleration_) {
+      // Consume each PMW3901 displacement exactly once. Flow and IMU callbacks run at different
+      // rates, so holding the newest flow velocity and integrating it from the IMU callback can
+      // skip some frames, reuse others, and carry velocity through a direction reversal.
+      const double flow_dt = static_cast<double>(message->integration_time);
+      position_ += tf2::Vector3(velocity_odom.x(), velocity_odom.y(), 0.0) * flow_dt;
+      position_variance_ += position_variance_growth_per_sec_ * flow_dt;
+    }
     linear_velocity_.setX(
       linear_velocity_.x() * (1.0 - flow_velocity_gain_) +
       velocity_odom.x() * flow_velocity_gain_);
@@ -820,10 +841,6 @@ private:
   void integrate_translation(const tf2::Vector3 & linear_acceleration, double dt)
   {
     if (!integrate_linear_acceleration_ || !acceleration_integration_available_) {
-      if (measurement_is_recent(last_valid_flow_stamp_, now(), flow_timeout_sec_)) {
-        position_ += tf2::Vector3(linear_velocity_.x(), linear_velocity_.y(), 0.0) * dt;
-        position_variance_ += position_variance_growth_per_sec_ * dt;
-      }
       return;
     }
     initialize_gravity_reference(linear_acceleration);
@@ -983,6 +1000,7 @@ private:
   int maximum_flow_shutter_ = 7999;
   double flow_radians_per_count_ = 0.0025;
   double flow_velocity_gain_ = 0.65;
+  double flow_rotation_compensation_gain_ = 1.0;
   double flow_timeout_sec_ = 0.20;
   double max_flow_angular_speed_rad_s_ = 0.50;
   double max_flow_linear_speed_m_s_ = 5.0;

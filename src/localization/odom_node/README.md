@@ -14,6 +14,12 @@ relative Z position and vertical velocity; its first valid sample after calibrat
 unless `range_reference_distance_m` is configured. Large range innovations are rejected so a
 sudden return from furniture or another non-floor surface cannot immediately jump odometry.
 
+When inertial translation is disabled, every accepted optical-flow displacement is integrated
+exactly once in the flow callback. This avoids scale and reversal errors caused by holding a
+100 Hz flow velocity and integrating it from the independently timed IMU callback. Roll/pitch
+image motion is removed using the calibrated body angular rate before flow is rotated into
+`odom`; `flow_rotation_compensation_gain` tunes that correction and defaults to `1.0`.
+
 The initial `flow_radians_per_count: 0.0025` and `flow_to_body_matrix` are calibration values, not
 universal properties of every PMW3901 lens and mounting. At a fixed measured height, translate the
 drone forward without rotating it and confirm `/odom.twist.twist.linear.x` is positive; translate

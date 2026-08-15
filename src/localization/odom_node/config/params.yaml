@@ -56,6 +56,9 @@ odom_node:
     # Initial scale only; calibrate this value against a measured translation.
     flow_radians_per_count: 0.0025
     flow_velocity_gain: 0.65
+    # Remove apparent planar motion caused by roll/pitch rotation of the
+    # downward camera. Set to 0 only for diagnostics.
+    flow_rotation_compensation_gain: 1.0
     flow_timeout_sec: 0.20
     # Reject flow during fast rotation instead of treating rotational image
     # motion as translation.
