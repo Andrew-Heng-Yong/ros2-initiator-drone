@@ -178,13 +178,13 @@ public:
     use_optical_flow_ = declare_parameter<bool>("use_optical_flow", true);
     minimum_flow_quality_ = declare_parameter<int>("minimum_flow_quality", 25);
     maximum_flow_shutter_ = declare_parameter<int>("maximum_flow_shutter", 7999);
-    flow_radians_per_count_ = declare_parameter<double>("flow_radians_per_count", 0.0025);
+    flow_radians_per_count_ = declare_parameter<double>("flow_radians_per_count", 0.0015);
     flow_velocity_gain_ = declare_parameter<double>("flow_velocity_gain", 0.65);
     flow_rotation_compensation_gain_ =
       declare_parameter<double>("flow_rotation_compensation_gain", 1.0);
     flow_timeout_sec_ = declare_parameter<double>("flow_timeout_sec", 0.20);
     max_flow_angular_speed_rad_s_ =
-      declare_parameter<double>("max_flow_angular_speed_rad_s", 0.50);
+      declare_parameter<double>("max_flow_angular_speed_rad_s", 0.30);
     max_flow_linear_speed_m_s_ =
       declare_parameter<double>("max_flow_linear_speed_m_s", 5.0);
     flow_to_body_matrix_ = declare_parameter<std::vector<double>>(
@@ -998,11 +998,11 @@ private:
   double max_linear_speed_m_s_ = 5.0;
   int minimum_flow_quality_ = 25;
   int maximum_flow_shutter_ = 7999;
-  double flow_radians_per_count_ = 0.0025;
+  double flow_radians_per_count_ = 0.0015;
   double flow_velocity_gain_ = 0.65;
   double flow_rotation_compensation_gain_ = 1.0;
   double flow_timeout_sec_ = 0.20;
-  double max_flow_angular_speed_rad_s_ = 0.50;
+  double max_flow_angular_speed_rad_s_ = 0.30;
   double max_flow_linear_speed_m_s_ = 5.0;
   std::vector<double> flow_to_body_matrix_{0.0, -1.0, 1.0, 0.0};
   double range_position_gain_ = 0.25;

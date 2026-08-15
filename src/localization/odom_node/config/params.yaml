@@ -53,8 +53,9 @@ odom_node:
     use_optical_flow: true
     minimum_flow_quality: 25
     maximum_flow_shutter: 7999
-    # Initial scale only; calibrate this value against a measured translation.
-    flow_radians_per_count: 0.0025
+    # Calibrated from the 2026-08-15 suspended-swing blackbox. The dominant
+    # roll axis measured about 666 flow counts/radian (0.00150 rad/count).
+    flow_radians_per_count: 0.0015
     flow_velocity_gain: 0.65
     # Remove apparent planar motion caused by roll/pitch rotation of the
     # downward camera. Set to 0 only for diagnostics.
@@ -62,7 +63,9 @@ odom_node:
     flow_timeout_sec: 0.20
     # Reject flow during fast rotation instead of treating rotational image
     # motion as translation.
-    max_flow_angular_speed_rad_s: 0.50
+    # The swing replay showed phase-dependent residuals above 0.30 rad/s even
+    # after rotation compensation, so do not integrate those samples as travel.
+    max_flow_angular_speed_rad_s: 0.30
     max_flow_linear_speed_m_s: 5.0
     # [body_vx from dx, body_vx from dy, body_vy from dx, body_vy from dy].
     # Change signs/order after a simple forward/left bench translation test.

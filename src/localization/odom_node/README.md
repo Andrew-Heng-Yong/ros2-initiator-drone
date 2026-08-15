@@ -20,13 +20,16 @@ exactly once in the flow callback. This avoids scale and reversal errors caused 
 image motion is removed using the calibrated body angular rate before flow is rotated into
 `odom`; `flow_rotation_compensation_gain` tunes that correction and defaults to `1.0`.
 
-The initial `flow_radians_per_count: 0.0025` and `flow_to_body_matrix` are calibration values, not
-universal properties of every PMW3901 lens and mounting. At a fixed measured height, translate the
-drone forward without rotating it and confirm `/odom.twist.twist.linear.x` is positive; translate
-left and confirm Y is positive. Change matrix signs/order if necessary. Then compare a measured
-translation or velocity with odometry and scale `flow_radians_per_count` proportionally. Do this
-before flight. Optical flow observes velocity, not absolute XY position, so it reduces IMU
-velocity drift but cannot eliminate accumulated position error by itself.
+The default `flow_radians_per_count: 0.0015` was measured from the dominant axis of a suspended
+swing recording on this airframe; `flow_to_body_matrix` is also mount-specific. At a fixed
+measured height, translate the drone forward without rotating it and confirm
+`/odom.twist.twist.linear.x` is positive; translate left and confirm Y is positive. Change matrix
+signs/order if necessary. Then compare a measured translation or velocity with odometry and scale
+`flow_radians_per_count` proportionally. Do this before flight. Optical flow observes velocity,
+not absolute XY position, so it reduces IMU velocity drift but cannot eliminate accumulated
+position error by itself. Flow above the conservative
+`max_flow_angular_speed_rad_s: 0.30` default is rejected because the swing replay showed
+phase-dependent residuals at higher rates even after roll/pitch compensation.
 
 Both gyro and acceleration pass through a rolling mean before calibration, attitude integration,
 translation integration, and calibrated IMU publication. `imu_average_window_size: 10` uses the
