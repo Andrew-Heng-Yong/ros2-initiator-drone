@@ -160,7 +160,7 @@ public:
       range_sensor_.startContinuous(intermeasurement_ms);
       range_started_ = true;
       RCLCPP_INFO(
-        get_logger(), "VL53L1X connected on %s at 0x29 (long mode, %d us budget)",
+        get_logger(), "VL53L1X connected on %s at 0x29 (long mode, %ld us budget)",
         i2c_device.c_str(), timing_budget_us);
       const auto poll_period = std::min(
         rate_period(range_rate_hz_),
