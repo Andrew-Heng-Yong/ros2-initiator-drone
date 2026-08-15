@@ -9,6 +9,7 @@
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>flow_range_sensor_node</exec_depend>
   <exec_depend>mi0802_senxor_driver</exec_depend>
   <exec_depend>mlx90640_node</exec_depend>
   <exec_depend>mpu6050_node</exec_depend>

@@ -1,0 +1,13 @@
+std_msgs/Header header
+bool motion_detected
+int16 delta_x
+int16 delta_y
+uint8 quality
+uint8 observation
+uint8 raw_data_sum
+uint8 raw_data_max
+uint8 raw_data_min
+uint16 shutter
+float32 integration_time
+bool range_valid
+float32 ground_distance

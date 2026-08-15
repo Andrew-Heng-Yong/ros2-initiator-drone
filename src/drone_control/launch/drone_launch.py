@@ -22,11 +22,14 @@ def generate_launch_description():
     mlx90640_params = os.path.join(mlx90640_share, 'config', 'params.yaml')
     mpu6050_share = get_package_share_directory('mpu6050_node')
     mpu6050_params = os.path.join(mpu6050_share, 'config', 'params.yaml')
+    flow_range_share = get_package_share_directory('flow_range_sensor_node')
+    flow_range_params = os.path.join(flow_range_share, 'config', 'params.yaml')
     odom_share = get_package_share_directory('odom_node')
     odom_params = os.path.join(odom_share, 'config', 'params.yaml')
     start_rosbridge = LaunchConfiguration('start_rosbridge')
     start_depth_camera = LaunchConfiguration('start_depth_camera')
     start_imu = LaunchConfiguration('start_imu')
+    start_flow_range = LaunchConfiguration('start_flow_range')
     start_odom = LaunchConfiguration('start_odom')
     odom_static_override = LaunchConfiguration('odom_static_override')
     odom_quality_override = LaunchConfiguration('odom_quality_override')
@@ -162,6 +165,11 @@ def generate_launch_description():
             'start_imu',
             default_value=start_odom,
             description='Start the MPU6050 IMU driver (defaults to start_odom).',
+        ),
+        DeclareLaunchArgument(
+            'start_flow_range',
+            default_value='false',
+            description='Start the PMW3901 optical-flow and VL53L1X range driver.',
         ),
         DeclareLaunchArgument(
             'odom_static_override',
@@ -329,6 +337,14 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(start_imu),
             parameters=[mpu6050_params],
+        ),
+        Node(
+            package='flow_range_sensor_node',
+            executable='flow_range_sensor_node',
+            name='flow_range_sensor_node',
+            output='screen',
+            condition=IfCondition(start_flow_range),
+            parameters=[flow_range_params],
         ),
         Node(
             package='odom_node',

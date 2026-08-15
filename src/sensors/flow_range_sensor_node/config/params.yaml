@@ -1,0 +1,29 @@
+flow_range_sensor_node:
+  ros__parameters:
+    enable_flow: true
+    enable_range: true
+
+    # PMW3901 on Raspberry Pi SPI0 CE1.
+    spi_device: /dev/spidev0.1
+    spi_speed_hz: 400000
+    spi_mode: 0
+    flow_rotation: 0       # 0, 90, 180, or 270 degrees
+    flow_rate_hz: 100.0
+    flow_frame_id: flow_link
+    flow_topic: /optical_flow/raw
+    minimum_flow_quality: 25
+    dark_shutter_threshold: 8000
+
+    # VL53L1X 4 m sensor on Raspberry Pi I2C1.
+    i2c_device: /dev/i2c-1
+    i2c_address: 41        # 0x29
+    range_rate_hz: 20.0
+    range_timing_budget_us: 50000
+    range_frame_id: range_link
+    range_topic: /range/down
+    range_min_m: 0.04
+    range_max_m: 4.0
+    range_field_of_view: 0.471
+    range_stale_after: 0.20
+
+    diagnostics_topic: /diagnostics
