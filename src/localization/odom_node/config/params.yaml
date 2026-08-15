@@ -17,9 +17,11 @@ odom_node:
     # Force position confidence low enough for visualization clients regardless
     # of inertial drift. This changes reported quality only.
     quality_override: false
-    # Experimental IMU-only translation. This drives /odom XYZ for existing
-    # clients without app changes, but will drift without an external reference.
-    integrate_linear_acceleration: true
+    # Keep translation tied to external observations. When flow/range is
+    # unavailable, hold position and report it unobserved instead of double
+    # integrating accelerometer noise into false motion. Enable only for
+    # experimental IMU dead reckoning, which will drift without a reference.
+    integrate_linear_acceleration: false
     # Learn accelerometer gain from stationary gravity. This also handles
     # MPU-compatible boards whose effective range differs from readback.
     auto_scale_acceleration: true

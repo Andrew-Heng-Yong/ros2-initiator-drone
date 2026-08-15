@@ -151,7 +151,7 @@ public:
     static_override_ = declare_parameter<bool>("static_override", false);
     quality_override_ = declare_parameter<bool>("quality_override", false);
     integrate_linear_acceleration_ =
-      declare_parameter<bool>("integrate_linear_acceleration", true);
+      declare_parameter<bool>("integrate_linear_acceleration", false);
     auto_scale_acceleration_ = declare_parameter<bool>("auto_scale_acceleration", true);
     imu_average_window_size_ = declare_parameter<int>("imu_average_window_size", 10);
 
@@ -955,7 +955,7 @@ private:
   bool publish_tf_ = true;
   bool static_override_ = false;
   bool quality_override_ = false;
-  bool integrate_linear_acceleration_ = true;
+  bool integrate_linear_acceleration_ = false;
   bool auto_scale_acceleration_ = true;
   bool use_optical_flow_ = true;
   bool use_rangefinder_ = true;

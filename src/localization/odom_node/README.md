@@ -63,20 +63,20 @@ gravity, so an IMU that is not mounted with its `+X` forward and `+Y` left needs
 rotation declared in `imu_to_body_rotation_rpy`; otherwise roll, pitch, and yaw come out swapped
 or mirrored no matter how well the node is calibrated.
 
-With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
-also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.
-This handles MPU-compatible boards whose effective range differs from register readback. Set
-`auto_scale_acceleration: false` only when the IMU's SI scale is already known to be accurate.
-Mounted acceleration is then rotated into `odom`, the calibrated gravity reference is removed,
-and the remainder is lightly low-pass filtered and integrated in three dimensions. Deadbanding,
-velocity damping, and acceleration and speed limits constrain obvious runaway. The node does not
-infer stationarity or apply zero-velocity updates from IMU data because steady motion is
-indistinguishable from rest to an IMU. This makes existing `/odom` clients react to linear motion
-without app changes. When flow or range is rejected, the estimator falls back to inertial dead
-reckoning; small bias and attitude errors are then integrated twice. Position must not be treated
-as safety-grade or a long-term absolute estimate. Add VIO, GPS, or another absolute reference for
-bounded global XY error. Set `integrate_linear_acceleration: false` to use accepted flow for planar
-translation without the inertial translation fallback.
+The supplied `integrate_linear_acceleration: false` configuration updates planar translation only
+from accepted optical flow and vertical translation from the rangefinder. If external aiding is
+rejected, the node holds position and advertises unobserved covariance instead of turning IMU
+noise into false motion. A saturated PMW3901 shutter is deliberately rejected; improve downward
+lighting and surface texture rather than raising `maximum_flow_shutter` for flight.
+
+Stationary calibration still learns an acceleration scale that maps measured gravity magnitude to
+`9.80665 m/s^2`. This handles MPU-compatible boards whose effective range differs from register
+readback. Set `auto_scale_acceleration: false` only when the IMU's SI scale is already known to be
+accurate. Set `integrate_linear_acceleration: true` only for experimental inertial dead reckoning.
+In that mode, mounted acceleration is rotated into `odom`, calibrated gravity is removed, and the
+remainder is filtered and integrated in three dimensions. The node cannot infer stationarity from
+IMU data, so small bias and attitude errors are integrated twice whenever external aiding is
+unavailable. Use VIO, GPS, or another absolute reference for bounded global XY error.
 
 For stationary bench testing, set `static_override: true` or launch with
 `static_override:=true`. This skips gyro calibration and integration and publishes a fixed identity
