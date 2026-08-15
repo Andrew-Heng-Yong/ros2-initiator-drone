@@ -10,12 +10,6 @@ translation integration, and calibrated IMU publication. `imu_average_window_siz
 latest ten reads while retaining the input update rate after the window fills. At 100 Hz this adds
 about 45 ms of mean measurement delay; set the parameter to `1` to disable averaging.
 
-Stationarity uses low temporal variance in a window of gravity-compensated planar acceleration,
-low gyro rate, and a broad mean-bias sanity cap. It does not require acceleration bias to fall
-inside a small fixed deadband. Once a stationary interval is confirmed, the node zeros velocity,
-adapts its gravity reference, and restores the position from the beginning of the confirmation
-window so persistent sensor bias during that window is not recorded as displacement.
-
 To inspect the stationary IMU calibration independently, run the included Python sampler while
 the robot is completely still. It collects exactly 1,000 valid samples by default and reports the
 raw acceleration mean and noise, measured gravity magnitude, odometry acceleration scale, and
@@ -42,26 +36,27 @@ publishes odometry.
 
 Calibration also learns a leveling rotation from the stationary gravity direction. The node
 applies that rotation consistently to acceleration and gyro axes, so a stationary calibrated IMU
-reports approximately `[0, 0, -9.80665] m/s^2` even when the physical sensor is mounted at an
-angle. Relative odometry orientation still starts at identity; yaw remains defined by the startup
-heading because gravity cannot observe yaw.
+reports approximately `[0, 0, +9.80665] m/s^2` even when the physical sensor is mounted at an
+angle. The sign follows `sensor_msgs/Imu`: an accelerometer measures specific force, so at rest
+it reads `+g` along the frame's up axis, not `-g`. Relative odometry orientation still starts at
+identity; yaw remains defined by the startup heading because gravity cannot observe yaw.
+
+Levelling therefore corrects tilt only. It cannot correct how the board is rotated *about*
+gravity, so an IMU that is not mounted with its `+X` forward and `+Y` left needs that mounting
+rotation declared in `imu_to_body_rotation_rpy`; otherwise roll, pitch, and yaw come out swapped
+or mirrored no matter how well the node is calibrated.
 
 With the supplied `integrate_linear_acceleration: true` configuration, the stationary calibration
 also learns an acceleration scale that maps the measured gravity magnitude to `9.80665 m/s^2`.
 This handles MPU-compatible boards whose effective range differs from register readback. Set
 `auto_scale_acceleration: false` only when the IMU's SI scale is already known to be accurate.
 Mounted acceleration is then rotated into `odom`, the calibrated gravity reference is removed,
-and the remainder is integrated into velocity and position. Deadbanding, velocity damping and
-limits, and a stationary zero-velocity update constrain obvious runaway.
-`planar_translation: true` projects acceleration
-onto the plane perpendicular to the calibrated gravity vector, maps that plane onto odom X/Y, and
-locks Z velocity and position to zero. This remains responsive when the physical IMU Z axis is not
-the robot's vertical axis. It also prevents a small gravity error from integrating into a vertical
-launch or fall. Disable it only when genuine vertical motion is required. The planar acceleration
-is lightly low-pass filtered before integration; the configured deadband and stationary threshold
-are deliberately below ordinary gentle robot acceleration. This makes existing `/odom` clients
-react to linear motion without app changes. It is still IMU-only dead reckoning: small bias and
-attitude errors are integrated twice, so X/Y position will drift and must not be treated as a
+and the remainder is lightly low-pass filtered and integrated in three dimensions. Deadbanding,
+velocity damping, and acceleration and speed limits constrain obvious runaway. The node does not
+infer stationarity or apply zero-velocity updates from IMU data because steady motion is
+indistinguishable from rest to an IMU. This makes existing `/odom` clients react to linear motion
+without app changes. It is still IMU-only dead reckoning: small bias and attitude errors are
+integrated twice, so position will drift and must not be treated as a
 safety-grade or long-term position estimate. Add optical flow, VIO, wheel odometry, GPS, or another
 external reference for reliable translation. Set `integrate_linear_acceleration: false` to restore
 the orientation-only behavior and unobserved position covariance.
@@ -78,10 +73,8 @@ It changes only advertised confidence, not the pose estimate or its drift.
 
 The node rotates IMU samples from the mounted sensor frame into `base_link`, removes stationary
 gyro bias, and integrates the midpoint of consecutive angular-rate samples. Translation uses the
-same published orientation seen by clients. A sample window is considered stationary only when
-both angular rate and gravity-compensated acceleration remain near zero; sustained
-stationarity zeros velocity and slowly adapts the gravity reference. The node does not integrate
-across out-of-order timestamps or gaps longer than `max_imu_gap_sec`.
+same published orientation seen by clients. The node does not integrate across out-of-order
+timestamps or gaps longer than `max_imu_gap_sec`.
 
 Build and run it directly:
 
