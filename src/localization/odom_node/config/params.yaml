@@ -5,6 +5,8 @@ odom_node:
     odom_topic: /odom
     calibration_status_topic: /odom/calibrated
     calibration_service: /odom/calibrate
+    flow_topic: /optical_flow/raw
+    range_topic: /range/down
 
     odom_frame: odom
     base_frame: base_link
@@ -44,6 +46,34 @@ odom_node:
     max_linear_acceleration_m_s2: 15.0
     max_linear_speed_m_s: 5.0
 
+    # External translation aiding. Flow counts are converted to planar body
+    # velocity using the live downward range, then blended with inertial velocity.
+    use_optical_flow: true
+    minimum_flow_quality: 25
+    maximum_flow_shutter: 7999
+    # Initial scale only; calibrate this value against a measured translation.
+    flow_radians_per_count: 0.0025
+    flow_velocity_gain: 0.65
+    flow_timeout_sec: 0.20
+    # Reject flow during fast rotation instead of treating rotational image
+    # motion as translation.
+    max_flow_angular_speed_rad_s: 0.50
+    max_flow_linear_speed_m_s: 5.0
+    # [body_vx from dx, body_vx from dy, body_vy from dx, body_vy from dy].
+    # Change signs/order after a simple forward/left bench translation test.
+    flow_to_body_matrix: [0.0, -1.0, 1.0, 0.0]
+
+    # Downward range is fused as relative Z. The first valid post-calibration
+    # sample defines Z=0 unless range_reference_distance_m is set explicitly.
+    use_rangefinder: true
+    range_position_gain: 0.25
+    range_velocity_gain: 0.20
+    range_timeout_sec: 0.20
+    maximum_range_vertical_speed_m_s: 3.0
+    maximum_range_innovation_m: 0.75
+    minimum_range_vertical_projection: 0.50
+    range_reference_distance_m: -1.0
+
     # Rotation from the mounted IMU frame into base_link.
     # The MPU6050 is mounted upside down: a stationary /imu/data_raw reads
     # [0, 0, -9.8], so the board's +Z points at the floor. A 180 degree roll
@@ -64,3 +94,6 @@ odom_node:
     linear_acceleration_variance: 0.10
     initial_inertial_position_variance: 0.25
     position_variance_growth_per_sec: 0.25
+    flow_velocity_variance: 0.04
+    range_position_variance: 0.01
+    range_velocity_variance: 0.04

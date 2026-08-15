@@ -1,13 +1,15 @@
 <?xml version="1.0"?>
 <package format="3">
   <name>odom_node</name>
-  <version>0.2.0</version>
-  <description>IMU dead-reckoning odometry for the initiator drone.</description>
+  <version>0.3.0</version>
+  <description>IMU odometry aided by PMW3901 optical flow and VL53L1X range.</description>
   <maintainer email="user@example.com">Workspace maintainer</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>builtin_interfaces</depend>
+  <depend>flow_range_sensor_node</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>

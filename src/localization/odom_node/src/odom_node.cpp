@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <stdexcept>
@@ -9,12 +10,15 @@
 #include <utility>
 #include <vector>
 
+#include "builtin_interfaces/msg/time.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "geometry_msgs/msg/vector3.hpp"
+#include "flow_range_sensor_node/msg/optical_flow.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
+#include "sensor_msgs/msg/range.hpp"
 #include "std_msgs/msg/bool.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "tf2/LinearMath/Quaternion.h"
@@ -139,6 +143,8 @@ public:
       declare_parameter<std::string>("calibration_status_topic", "/odom/calibrated");
     calibration_service_name_ =
       declare_parameter<std::string>("calibration_service", "/odom/calibrate");
+    flow_topic_ = declare_parameter<std::string>("flow_topic", "/optical_flow/raw");
+    range_topic_ = declare_parameter<std::string>("range_topic", "/range/down");
     odom_frame_ = declare_parameter<std::string>("odom_frame", "odom");
     base_frame_ = declare_parameter<std::string>("base_frame", "base_link");
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
@@ -169,6 +175,32 @@ public:
       declare_parameter<double>("max_linear_acceleration_m_s2", 15.0);
     max_linear_speed_m_s_ = declare_parameter<double>("max_linear_speed_m_s", 5.0);
 
+    use_optical_flow_ = declare_parameter<bool>("use_optical_flow", true);
+    minimum_flow_quality_ = declare_parameter<int>("minimum_flow_quality", 25);
+    maximum_flow_shutter_ = declare_parameter<int>("maximum_flow_shutter", 7999);
+    flow_radians_per_count_ = declare_parameter<double>("flow_radians_per_count", 0.0025);
+    flow_velocity_gain_ = declare_parameter<double>("flow_velocity_gain", 0.65);
+    flow_timeout_sec_ = declare_parameter<double>("flow_timeout_sec", 0.20);
+    max_flow_angular_speed_rad_s_ =
+      declare_parameter<double>("max_flow_angular_speed_rad_s", 0.50);
+    max_flow_linear_speed_m_s_ =
+      declare_parameter<double>("max_flow_linear_speed_m_s", 5.0);
+    flow_to_body_matrix_ = declare_parameter<std::vector<double>>(
+      "flow_to_body_matrix", {0.0, -1.0, 1.0, 0.0});
+
+    use_rangefinder_ = declare_parameter<bool>("use_rangefinder", true);
+    range_position_gain_ = declare_parameter<double>("range_position_gain", 0.25);
+    range_velocity_gain_ = declare_parameter<double>("range_velocity_gain", 0.20);
+    range_timeout_sec_ = declare_parameter<double>("range_timeout_sec", 0.20);
+    maximum_range_vertical_speed_m_s_ =
+      declare_parameter<double>("maximum_range_vertical_speed_m_s", 3.0);
+    maximum_range_innovation_m_ =
+      declare_parameter<double>("maximum_range_innovation_m", 0.75);
+    minimum_range_vertical_projection_ =
+      declare_parameter<double>("minimum_range_vertical_projection", 0.50);
+    range_reference_distance_m_ =
+      declare_parameter<double>("range_reference_distance_m", -1.0);
+
     imu_to_body_ = quaternion_from_rpy(
       declare_parameter<std::vector<double>>("imu_to_body_rotation_rpy", {0.0, 0.0, 0.0}),
       "imu_to_body_rotation_rpy");
@@ -189,6 +221,9 @@ public:
       declare_parameter<double>("initial_inertial_position_variance", 0.25);
     position_variance_growth_per_sec_ =
       declare_parameter<double>("position_variance_growth_per_sec", 0.25);
+    flow_velocity_variance_ = declare_parameter<double>("flow_velocity_variance", 0.04);
+    range_position_variance_ = declare_parameter<double>("range_position_variance", 0.01);
+    range_velocity_variance_ = declare_parameter<double>("range_velocity_variance", 0.04);
 
     validate_parameters();
     orientation_variance_ = initial_orientation_variance_;
@@ -208,6 +243,23 @@ public:
     imu_subscription_ = create_subscription<sensor_msgs::msg::Imu>(
       imu_topic_, rclcpp::SensorDataQoS(),
       [this](sensor_msgs::msg::Imu::ConstSharedPtr message) {on_imu(std::move(message));});
+    if (use_optical_flow_) {
+      flow_subscription_ =
+        create_subscription<flow_range_sensor_node::msg::OpticalFlow>(
+        flow_topic_, rclcpp::SensorDataQoS(),
+        [this](flow_range_sensor_node::msg::OpticalFlow::ConstSharedPtr message)
+        {
+          on_optical_flow(std::move(message));
+        });
+    }
+    if (use_rangefinder_) {
+      range_subscription_ = create_subscription<sensor_msgs::msg::Range>(
+        range_topic_, rclcpp::SensorDataQoS(),
+        [this](sensor_msgs::msg::Range::ConstSharedPtr message)
+        {
+          on_range(std::move(message));
+        });
+    }
     calibration_service_ = create_service<std_srvs::srv::Trigger>(
       calibration_service_name_,
       [this](
@@ -240,8 +292,15 @@ public:
     if (integrate_linear_acceleration_ && !static_override_) {
       RCLCPP_WARN(
         get_logger(),
-        "IMU-only translation active: acceleration will drive /odom position, but drift is "
-        "unbounded without an external position reference");
+        "Inertial translation active: acceleration is the fallback between accepted external "
+        "flow/range measurements and will drift whenever external aiding is unavailable");
+    }
+    if ((use_optical_flow_ || use_rangefinder_) && !static_override_) {
+      RCLCPP_INFO(
+        get_logger(),
+        "External translation aiding enabled: flow=%s (%s), range=%s (%s)",
+        use_optical_flow_ ? "on" : "off", flow_topic_.c_str(),
+        use_rangefinder_ ? "on" : "off", range_topic_.c_str());
     }
     RCLCPP_INFO(
       get_logger(), "IMU rolling average enabled over %d reads", imu_average_window_size_);
@@ -252,6 +311,7 @@ private:
   {
     if (imu_topic_.empty() || calibrated_imu_topic_.empty() || odom_topic_.empty() ||
       calibration_status_topic_.empty() || calibration_service_name_.empty() ||
+      (use_optical_flow_ && flow_topic_.empty()) || (use_rangefinder_ && range_topic_.empty()) ||
       odom_frame_.empty() || base_frame_.empty())
     {
       throw std::invalid_argument("topic, service, and frame parameters must not be empty");
@@ -268,10 +328,159 @@ private:
       quality_override_position_variance_ < 0.0 ||
       initial_orientation_variance_ < 0.0 ||
       angular_velocity_variance_ < 0.0 || linear_acceleration_variance_ < 0.0 ||
-      initial_inertial_position_variance_ < 0.0 || position_variance_growth_per_sec_ < 0.0)
+      initial_inertial_position_variance_ < 0.0 || position_variance_growth_per_sec_ < 0.0 ||
+      minimum_flow_quality_ < 0 || minimum_flow_quality_ > 255 ||
+      maximum_flow_shutter_ < 0 || maximum_flow_shutter_ > 8191 ||
+      flow_radians_per_count_ <= 0.0 || flow_velocity_gain_ < 0.0 ||
+      flow_velocity_gain_ > 1.0 || flow_timeout_sec_ <= 0.0 ||
+      max_flow_angular_speed_rad_s_ <= 0.0 || max_flow_linear_speed_m_s_ <= 0.0 ||
+      flow_to_body_matrix_.size() != 4U || range_position_gain_ < 0.0 ||
+      range_position_gain_ > 1.0 || range_velocity_gain_ < 0.0 ||
+      range_velocity_gain_ > 1.0 || range_timeout_sec_ <= 0.0 ||
+      maximum_range_vertical_speed_m_s_ <= 0.0 ||
+      maximum_range_innovation_m_ <= 0.0 ||
+      minimum_range_vertical_projection_ <= 0.0 || minimum_range_vertical_projection_ > 1.0 ||
+      (range_reference_distance_m_ < 0.0 &&
+      std::abs(range_reference_distance_m_ + 1.0) > kSmallAngle) ||
+      flow_velocity_variance_ < 0.0 ||
+      range_position_variance_ < 0.0 || range_velocity_variance_ < 0.0)
     {
       throw std::invalid_argument("invalid gyro odometry parameters");
     }
+  }
+
+  rclcpp::Time message_stamp_or_now(const builtin_interfaces::msg::Time & header_stamp) const
+  {
+    const rclcpp::Time stamp(header_stamp);
+    return stamp.nanoseconds() == 0 ? now() : stamp;
+  }
+
+  bool measurement_is_recent(
+    const rclcpp::Time & measurement_stamp, const rclcpp::Time & output_stamp,
+    double timeout_sec) const
+  {
+    return measurement_stamp.nanoseconds() != 0 &&
+           std::abs((output_stamp - measurement_stamp).seconds()) <= timeout_sec;
+  }
+
+  void on_optical_flow(
+    const flow_range_sensor_node::msg::OpticalFlow::ConstSharedPtr & message)
+  {
+    if (!initialized_ || static_override_ || !message->range_valid ||
+      !std::isfinite(message->ground_distance) || message->ground_distance <= 0.0F ||
+      !std::isfinite(message->integration_time) || message->integration_time <= 0.0F ||
+      message->integration_time > flow_timeout_sec_ ||
+      message->quality < minimum_flow_quality_ || message->shutter > maximum_flow_shutter_ ||
+      latest_angular_velocity_.length() > max_flow_angular_speed_rad_s_)
+    {
+      return;
+    }
+
+    const rclcpp::Time stamp = message_stamp_or_now(message->header.stamp);
+    if (std::abs((now() - stamp).seconds()) > flow_timeout_sec_) {
+      return;
+    }
+
+    const double count_to_velocity =
+      flow_radians_per_count_ * static_cast<double>(message->ground_distance) /
+      static_cast<double>(message->integration_time);
+    const double delta_x = message->motion_detected ?
+      static_cast<double>(message->delta_x) : 0.0;
+    const double delta_y = message->motion_detected ?
+      static_cast<double>(message->delta_y) : 0.0;
+    const tf2::Vector3 velocity_body(
+      count_to_velocity *
+      (flow_to_body_matrix_[0] * delta_x + flow_to_body_matrix_[1] * delta_y),
+      count_to_velocity *
+      (flow_to_body_matrix_[2] * delta_x + flow_to_body_matrix_[3] * delta_y),
+      0.0);
+    if (!is_finite(velocity_body) || velocity_body.length() > max_flow_linear_speed_m_s_) {
+      return;
+    }
+
+    const tf2::Vector3 velocity_odom = tf2::quatRotate(orientation_, velocity_body);
+    linear_velocity_.setX(
+      linear_velocity_.x() * (1.0 - flow_velocity_gain_) +
+      velocity_odom.x() * flow_velocity_gain_);
+    linear_velocity_.setY(
+      linear_velocity_.y() * (1.0 - flow_velocity_gain_) +
+      velocity_odom.y() * flow_velocity_gain_);
+    last_valid_flow_stamp_ = stamp;
+    if (accepted_flow_samples_ == 0) {
+      RCLCPP_INFO(
+        get_logger(), "Accepted first optical-flow aid: quality=%u range=%.3f m",
+        static_cast<unsigned int>(message->quality), message->ground_distance);
+    }
+    ++accepted_flow_samples_;
+  }
+
+  void on_range(const sensor_msgs::msg::Range::ConstSharedPtr & message)
+  {
+    if (!initialized_ || static_override_ || !std::isfinite(message->range) ||
+      message->range < message->min_range || message->range > message->max_range)
+    {
+      return;
+    }
+
+    const rclcpp::Time stamp = message_stamp_or_now(message->header.stamp);
+    if (std::abs((now() - stamp).seconds()) > range_timeout_sec_) {
+      return;
+    }
+
+    const tf2::Vector3 range_ray_odom =
+      tf2::quatRotate(orientation_, tf2::Vector3(0.0, 0.0, -1.0));
+    const double vertical_projection = std::max(0.0, -range_ray_odom.z());
+    if (vertical_projection < minimum_range_vertical_projection_) {
+      return;
+    }
+    const double vertical_height = static_cast<double>(message->range) * vertical_projection;
+
+    if (!range_reference_initialized_) {
+      range_reference_height_m_ = range_reference_distance_m_ >= 0.0 ?
+        range_reference_distance_m_ : vertical_height;
+      previous_range_position_m_ = vertical_height - range_reference_height_m_;
+      last_range_measurement_stamp_ = stamp;
+      last_valid_range_stamp_ = stamp;
+      range_reference_initialized_ = true;
+      RCLCPP_INFO(
+        get_logger(), "Range reference initialized at %.3f m vertical height",
+        range_reference_height_m_);
+      ++accepted_range_samples_;
+      return;
+    }
+
+    const double dt = (stamp - last_range_measurement_stamp_).seconds();
+    if (dt <= 0.0 || dt > range_timeout_sec_) {
+      previous_range_position_m_ = vertical_height - range_reference_height_m_;
+      last_range_measurement_stamp_ = stamp;
+      return;
+    }
+
+    const double measured_position_z = vertical_height - range_reference_height_m_;
+    if (std::abs(measured_position_z - position_.z()) > maximum_range_innovation_m_) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 2000,
+        "Rejecting range innovation %.3f m larger than %.3f m",
+        measured_position_z - position_.z(), maximum_range_innovation_m_);
+      previous_range_position_m_ = measured_position_z;
+      last_range_measurement_stamp_ = stamp;
+      return;
+    }
+
+    const double measured_velocity_z = std::clamp(
+      (measured_position_z - previous_range_position_m_) / dt,
+      -maximum_range_vertical_speed_m_s_, maximum_range_vertical_speed_m_s_);
+    position_.setZ(
+      position_.z() * (1.0 - range_position_gain_) +
+      measured_position_z * range_position_gain_);
+    linear_velocity_.setZ(
+      linear_velocity_.z() * (1.0 - range_velocity_gain_) +
+      measured_velocity_z * range_velocity_gain_);
+
+    previous_range_position_m_ = measured_position_z;
+    last_range_measurement_stamp_ = stamp;
+    last_valid_range_stamp_ = stamp;
+    ++accepted_range_samples_;
   }
 
   void on_imu(const sensor_msgs::msg::Imu::ConstSharedPtr & message)
@@ -325,6 +534,7 @@ private:
     const tf2::Vector3 calibrated_acceleration =
       tf2::quatRotate(calibration_alignment_, averaged_acceleration) *
       acceleration_scale_factor_;
+    latest_angular_velocity_ = angular_velocity;
     if (!has_previous_sample_) {
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
@@ -429,6 +639,7 @@ private:
     previous_angular_velocity_.setValue(0.0, 0.0, 0.0);
     position_.setValue(0.0, 0.0, 0.0);
     linear_velocity_.setValue(0.0, 0.0, 0.0);
+    latest_angular_velocity_.setValue(0.0, 0.0, 0.0);
     filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
     gravity_odom_.setValue(0.0, 0.0, 0.0);
     has_gravity_reference_ = false;
@@ -438,6 +649,14 @@ private:
     orientation_ = tf2::Quaternion::getIdentity();
     orientation_variance_ = initial_orientation_variance_;
     position_variance_ = initial_inertial_position_variance_;
+    range_reference_initialized_ = false;
+    range_reference_height_m_ = 0.0;
+    previous_range_position_m_ = 0.0;
+    last_valid_flow_stamp_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+    last_valid_range_stamp_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+    last_range_measurement_stamp_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+    accepted_flow_samples_ = 0;
+    accepted_range_samples_ = 0;
     publish_calibration_status(false);
   }
 
@@ -601,6 +820,10 @@ private:
   void integrate_translation(const tf2::Vector3 & linear_acceleration, double dt)
   {
     if (!integrate_linear_acceleration_ || !acceleration_integration_available_) {
+      if (measurement_is_recent(last_valid_flow_stamp_, now(), flow_timeout_sec_)) {
+        position_ += tf2::Vector3(linear_velocity_.x(), linear_velocity_.y(), 0.0) * dt;
+        position_variance_ += position_variance_growth_per_sec_ * dt;
+      }
       return;
     }
     initialize_gravity_reference(linear_acceleration);
@@ -677,22 +900,31 @@ private:
     odometry.twist.twist.linear = vector_message(linear_velocity_);
     odometry.twist.twist.angular = vector_message(angular_velocity);
 
-    // Static override promises a fixed origin. Quality override changes only reported confidence.
-    // Otherwise inertial translation reports a growing variance; disabled integration retains the
-    // old unobserved-position contract.
-    const double position_variance = static_pose ? static_position_variance_ :
+    const bool flow_recent = use_optical_flow_ &&
+      measurement_is_recent(last_valid_flow_stamp_, stamp, flow_timeout_sec_);
+    const bool range_recent = use_rangefinder_ &&
+      measurement_is_recent(last_valid_range_stamp_, stamp, range_timeout_sec_);
+    const bool inertial_translation =
+      integrate_linear_acceleration_ && acceleration_integration_available_;
+    const double horizontal_position_variance = static_pose ? static_position_variance_ :
       (quality_override_ ? quality_override_position_variance_ :
-      (integrate_linear_acceleration_ && acceleration_integration_available_ ?
-      position_variance_ : unobserved_position_variance_));
-    odometry.pose.covariance[0] = position_variance;
-    odometry.pose.covariance[7] = position_variance;
-    odometry.pose.covariance[14] = position_variance;
+      (inertial_translation || flow_recent ? position_variance_ : unobserved_position_variance_));
+    const double vertical_position_variance = static_pose ? static_position_variance_ :
+      (quality_override_ ? quality_override_position_variance_ :
+      (range_recent ? range_position_variance_ :
+      (inertial_translation ? position_variance_ : unobserved_position_variance_)));
+    odometry.pose.covariance[0] = horizontal_position_variance;
+    odometry.pose.covariance[7] = horizontal_position_variance;
+    odometry.pose.covariance[14] = vertical_position_variance;
     odometry.pose.covariance[21] = orientation_variance_;
     odometry.pose.covariance[28] = orientation_variance_;
     odometry.pose.covariance[35] = orientation_variance_;
-    odometry.twist.covariance[0] = position_variance;
-    odometry.twist.covariance[7] = position_variance;
-    odometry.twist.covariance[14] = position_variance;
+    odometry.twist.covariance[0] = flow_recent ?
+      flow_velocity_variance_ : horizontal_position_variance;
+    odometry.twist.covariance[7] = flow_recent ?
+      flow_velocity_variance_ : horizontal_position_variance;
+    odometry.twist.covariance[14] = range_recent ?
+      range_velocity_variance_ : vertical_position_variance;
     odometry.twist.covariance[21] = angular_velocity_variance_;
     odometry.twist.covariance[28] = angular_velocity_variance_;
     odometry.twist.covariance[35] = angular_velocity_variance_;
@@ -715,6 +947,8 @@ private:
   std::string odom_topic_;
   std::string calibration_status_topic_;
   std::string calibration_service_name_;
+  std::string flow_topic_;
+  std::string range_topic_;
   std::string odom_frame_;
   std::string base_frame_;
 
@@ -723,6 +957,8 @@ private:
   bool quality_override_ = false;
   bool integrate_linear_acceleration_ = true;
   bool auto_scale_acceleration_ = true;
+  bool use_optical_flow_ = true;
+  bool use_rangefinder_ = true;
   bool calibrated_ = false;
   bool initialized_ = false;
   bool has_previous_sample_ = false;
@@ -743,6 +979,21 @@ private:
   double velocity_damping_per_sec_ = 0.05;
   double max_linear_acceleration_m_s2_ = 15.0;
   double max_linear_speed_m_s_ = 5.0;
+  int minimum_flow_quality_ = 25;
+  int maximum_flow_shutter_ = 7999;
+  double flow_radians_per_count_ = 0.0025;
+  double flow_velocity_gain_ = 0.65;
+  double flow_timeout_sec_ = 0.20;
+  double max_flow_angular_speed_rad_s_ = 0.50;
+  double max_flow_linear_speed_m_s_ = 5.0;
+  std::vector<double> flow_to_body_matrix_{0.0, -1.0, 1.0, 0.0};
+  double range_position_gain_ = 0.25;
+  double range_velocity_gain_ = 0.20;
+  double range_timeout_sec_ = 0.20;
+  double maximum_range_vertical_speed_m_s_ = 3.0;
+  double maximum_range_innovation_m_ = 0.75;
+  double minimum_range_vertical_projection_ = 0.50;
+  double range_reference_distance_m_ = -1.0;
   double acceleration_scale_factor_ = 1.0;
   double unobserved_position_variance_ = 1.0e6;
   double static_position_variance_ = 0.01;
@@ -754,6 +1005,14 @@ private:
   double initial_inertial_position_variance_ = 0.25;
   double position_variance_growth_per_sec_ = 0.25;
   double position_variance_ = 0.25;
+  double flow_velocity_variance_ = 0.04;
+  double range_position_variance_ = 0.01;
+  double range_velocity_variance_ = 0.04;
+  bool range_reference_initialized_ = false;
+  double range_reference_height_m_ = 0.0;
+  double previous_range_position_m_ = 0.0;
+  uint64_t accepted_flow_samples_ = 0;
+  uint64_t accepted_range_samples_ = 0;
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion calibration_alignment_{tf2::Quaternion::getIdentity()};
@@ -768,17 +1027,23 @@ private:
   tf2::Vector3 position_{0.0, 0.0, 0.0};
   tf2::Vector3 linear_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 previous_angular_velocity_{0.0, 0.0, 0.0};
+  tf2::Vector3 latest_angular_velocity_{0.0, 0.0, 0.0};
   tf2::Vector3 acceleration_average_sum_{0.0, 0.0, 0.0};
   tf2::Vector3 gyro_average_sum_{0.0, 0.0, 0.0};
   std::deque<tf2::Vector3> acceleration_average_window_;
   std::deque<tf2::Vector3> gyro_average_window_;
   rclcpp::Time last_imu_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_valid_flow_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_valid_range_stamp_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_range_measurement_stamp_{0, 0, RCL_ROS_TIME};
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odometry_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr calibrated_imu_publisher_;
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr calibration_status_publisher_;
   rclcpp::TimerBase::SharedPtr calibration_status_timer_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_subscription_;
+  rclcpp::Subscription<flow_range_sensor_node::msg::OpticalFlow>::SharedPtr flow_subscription_;
+  rclcpp::Subscription<sensor_msgs::msg::Range>::SharedPtr range_subscription_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr calibration_service_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> transform_broadcaster_;
 };

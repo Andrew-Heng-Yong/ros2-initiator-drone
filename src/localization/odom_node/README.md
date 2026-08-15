@@ -1,9 +1,26 @@
 # Odometry node
 
-`odom_node` consumes IMU samples from `/imu/data_raw`, estimates gyro bias and a gravity reference
-while the drone is stationary, and publishes relative pose and velocity as
+`odom_node` consumes IMU samples from `/imu/data_raw`, PMW3901 samples from
+`/optical_flow/raw`, and VL53L1X distance from `/range/down`. It estimates gyro bias and a gravity
+reference while the drone is stationary, then publishes relative pose and velocity as
 `nav_msgs/msg/Odometry` on `/odom`. It also broadcasts `odom -> base_link` unless `publish_tf` is
 disabled.
+
+Optical flow is quality-gated and converted from counts to planar velocity using the live range
+measurement. Samples are rejected when range is stale or invalid, flow quality is low, the shutter
+indicates a dark surface, inferred speed is implausible, or the vehicle is rotating too fast.
+Accepted velocity is blended with inertial velocity. The rangefinder provides tilt-compensated
+relative Z position and vertical velocity; its first valid sample after calibration defines Z=0
+unless `range_reference_distance_m` is configured. Large range innovations are rejected so a
+sudden return from furniture or another non-floor surface cannot immediately jump odometry.
+
+The initial `flow_radians_per_count: 0.0025` and `flow_to_body_matrix` are calibration values, not
+universal properties of every PMW3901 lens and mounting. At a fixed measured height, translate the
+drone forward without rotating it and confirm `/odom.twist.twist.linear.x` is positive; translate
+left and confirm Y is positive. Change matrix signs/order if necessary. Then compare a measured
+translation or velocity with odometry and scale `flow_radians_per_count` proportionally. Do this
+before flight. Optical flow observes velocity, not absolute XY position, so it reduces IMU
+velocity drift but cannot eliminate accumulated position error by itself.
 
 Both gyro and acceleration pass through a rolling mean before calibration, attitude integration,
 translation integration, and calibrated IMU publication. `imu_average_window_size: 10` uses the
@@ -55,11 +72,11 @@ and the remainder is lightly low-pass filtered and integrated in three dimension
 velocity damping, and acceleration and speed limits constrain obvious runaway. The node does not
 infer stationarity or apply zero-velocity updates from IMU data because steady motion is
 indistinguishable from rest to an IMU. This makes existing `/odom` clients react to linear motion
-without app changes. It is still IMU-only dead reckoning: small bias and attitude errors are
-integrated twice, so position will drift and must not be treated as a
-safety-grade or long-term position estimate. Add optical flow, VIO, wheel odometry, GPS, or another
-external reference for reliable translation. Set `integrate_linear_acceleration: false` to restore
-the orientation-only behavior and unobserved position covariance.
+without app changes. When flow or range is rejected, the estimator falls back to inertial dead
+reckoning; small bias and attitude errors are then integrated twice. Position must not be treated
+as safety-grade or a long-term absolute estimate. Add VIO, GPS, or another absolute reference for
+bounded global XY error. Set `integrate_linear_acceleration: false` to use accepted flow for planar
+translation without the inertial translation fallback.
 
 For stationary bench testing, set `static_override: true` or launch with
 `static_override:=true`. This skips gyro calibration and integration and publishes a fixed identity

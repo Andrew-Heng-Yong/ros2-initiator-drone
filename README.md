@@ -76,7 +76,8 @@ The flow driver also publishes surface quality and shutter values. A shutter
 near 8191 indicates insufficient light rather than a broken SPI connection.
 See `src/sensors/flow_range_sensor_node/README.md` for pinout and parameters.
 
-To start gyro odometry, pass `start_odom:=true`; this also starts the MPU6050 by default. No
+To start gyro odometry, pass `start_odom:=true`; this also starts the MPU6050 and the
+PMW3901/VL53L1X flow-range driver by default. No
 camera stream is required. Keep the drone stationary while startup calibration collects 1000
 gyro samples and estimates angular-rate bias. Stationarity is determined primarily from sample
 variation, allowing a stable zero-rate sensor offset to be learned:
@@ -87,17 +88,17 @@ ros2 launch drone_control drone_launch.py \
 ros2 topic echo /odom
 ```
 
-The node consumes only `/imu/data_raw`. Its stationary calibration normalizes the measured
+The node consumes `/imu/data_raw`, `/optical_flow/raw`, and `/range/down`. Its stationary calibration normalizes the measured
 acceleration magnitude to standard gravity, allowing integration to work with MPU-compatible
 boards whose effective acceleration scale differs from register readback. It publishes completion
 on `/odom/calibrated` once per second (with transient-local durability for native ROS subscribers)
 and applies a ten-read rolling mean to gyro and acceleration before publishing bias-corrected gyro
 values, integrated relative orientation, and diagnostic acceleration on
 `/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
-acceleration into three-dimensional `/odom` velocity and position. It does not infer stationarity
-or apply zero-velocity resets from IMU data. Acceleration is lightly filtered before integration.
-This gives existing clients a motion response but is IMU-only dead reckoning and position will
-drift quickly. Parameters are configured in
+acceleration into three-dimensional `/odom` velocity and position. Quality-gated optical flow
+corrects planar velocity using the live range scale, while the rangefinder corrects relative Z.
+When either external measurement is stale or rejected, acceleration integration remains the
+fallback and will drift. Parameters are configured in
 `src/localization/odom_node/config/params.yaml`; replace the default IMU mount rotation with the
 measured value before flight. See the package README for estimator limitations.
 

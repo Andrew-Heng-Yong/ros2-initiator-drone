@@ -168,8 +168,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'start_flow_range',
-            default_value='false',
-            description='Start the PMW3901 optical-flow and VL53L1X range driver.',
+            default_value=start_odom,
+            description='Start the PMW3901/VL53L1X driver (defaults to start_odom).',
         ),
         DeclareLaunchArgument(
             'odom_static_override',
