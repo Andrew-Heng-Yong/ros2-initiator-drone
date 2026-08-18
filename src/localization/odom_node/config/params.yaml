@@ -70,6 +70,10 @@ odom_node:
     # [body_vx from dx, body_vx from dy, body_vy from dx, body_vy from dy].
     # Change signs/order after a simple forward/left bench translation test.
     flow_to_body_matrix: [0.0, -1.0, 1.0, 0.0]
+    # Vector from the base_link origin to the optical-flow sensor, expressed in
+    # base_link axes (x forward, y left, z up). The estimator removes omega x r
+    # so rotation about the drone origin is not reported as planar translation.
+    flow_position_offset_m: [0.0, 0.0, 0.0]
 
     # Downward range is fused as relative Z. The first valid post-calibration
     # sample defines Z=0 unless range_reference_distance_m is set explicitly.
@@ -90,6 +94,10 @@ odom_node:
     # head made the app pitch the model down. Levelling cannot recover this on
     # its own: gravity fixes tilt, never heading about gravity.
     imu_to_body_rotation_rpy: [3.14159265358979, 0.0, 0.0]
+    # Vector from the base_link origin to the IMU, expressed in base_link axes.
+    # Tangential and centripetal lever-arm acceleration are removed before
+    # inertial translation is integrated and /imu/data_calibrated is published.
+    imu_position_offset_m: [0.0, 0.0, 0.0]
 
     # Used when acceleration integration is disabled.
     unobserved_position_variance: 1000000.0

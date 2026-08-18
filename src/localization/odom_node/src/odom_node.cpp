@@ -62,6 +62,18 @@ tf2::Quaternion quaternion_from_rpy(const std::vector<double> & rpy, const std::
   return quaternion;
 }
 
+tf2::Vector3 vector_from_xyz(const std::vector<double> & xyz, const std::string & name)
+{
+  if (xyz.size() != 3U) {
+    throw std::invalid_argument(name + " must contain x, y, and z");
+  }
+  const tf2::Vector3 vector(xyz[0], xyz[1], xyz[2]);
+  if (!std::isfinite(vector.x()) || !std::isfinite(vector.y()) || !std::isfinite(vector.z())) {
+    throw std::invalid_argument(name + " must contain only finite values");
+  }
+  return vector;
+}
+
 tf2::Quaternion rotation_between_vectors(
   const tf2::Vector3 & source, const tf2::Vector3 & target)
 {
@@ -189,6 +201,9 @@ public:
       declare_parameter<double>("max_flow_linear_speed_m_s", 5.0);
     flow_to_body_matrix_ = declare_parameter<std::vector<double>>(
       "flow_to_body_matrix", {0.0, -1.0, 1.0, 0.0});
+    flow_position_offset_ = vector_from_xyz(
+      declare_parameter<std::vector<double>>("flow_position_offset_m", {0.0, 0.0, 0.0}),
+      "flow_position_offset_m");
 
     use_rangefinder_ = declare_parameter<bool>("use_rangefinder", true);
     range_position_gain_ = declare_parameter<double>("range_position_gain", 0.25);
@@ -206,6 +221,9 @@ public:
     imu_to_body_ = quaternion_from_rpy(
       declare_parameter<std::vector<double>>("imu_to_body_rotation_rpy", {0.0, 0.0, 0.0}),
       "imu_to_body_rotation_rpy");
+    imu_position_offset_ = vector_from_xyz(
+      declare_parameter<std::vector<double>>("imu_position_offset_m", {0.0, 0.0, 0.0}),
+      "imu_position_offset_m");
 
     unobserved_position_variance_ =
       declare_parameter<double>("unobserved_position_variance", 1.0e6);
@@ -306,6 +324,13 @@ public:
     }
     RCLCPP_INFO(
       get_logger(), "IMU rolling average enabled over %d reads", imu_average_window_size_);
+    RCLCPP_INFO(
+      get_logger(),
+      "Sensor offsets from %s origin: IMU=[%.4f %.4f %.4f] m, "
+      "flow=[%.4f %.4f %.4f] m",
+      base_frame_.c_str(),
+      imu_position_offset_.x(), imu_position_offset_.y(), imu_position_offset_.z(),
+      flow_position_offset_.x(), flow_position_offset_.y(), flow_position_offset_.z());
   }
 
 private:
@@ -406,7 +431,16 @@ private:
         ground_distance * latest_angular_velocity_.y(),
         -ground_distance * latest_angular_velocity_.x(), 0.0) *
         flow_rotation_compensation_gain_;
+
     }
+
+    // Optical flow measures the velocity at the sensor, while odometry reports the
+    // base_link origin. Remove the rigid-body velocity omega x r caused by mounting the
+    // sensor away from that origin. Only X/Y are observable from the downward flow sensor.
+    const tf2::Vector3 flow_lever_arm_velocity =
+      latest_angular_velocity_.cross(flow_position_offset_);
+    velocity_body -= tf2::Vector3(
+      flow_lever_arm_velocity.x(), flow_lever_arm_velocity.y(), 0.0);
     if (!is_finite(velocity_body) || velocity_body.length() > max_flow_linear_speed_m_s_) {
       return;
     }
@@ -560,8 +594,10 @@ private:
       previous_angular_velocity_ = angular_velocity;
       last_imu_stamp_ = stamp;
       has_previous_sample_ = true;
-      initialize_gravity_reference(calibrated_acceleration);
-      publish_outputs(stamp, angular_velocity, calibrated_acceleration);
+      const tf2::Vector3 base_acceleration = acceleration_at_base_origin(
+        calibrated_acceleration, angular_velocity, tf2::Vector3(0.0, 0.0, 0.0));
+      initialize_gravity_reference(base_acceleration);
+      publish_outputs(stamp, angular_velocity, base_acceleration);
       return;
     }
 
@@ -572,6 +608,13 @@ private:
       return;
     }
 
+    tf2::Vector3 angular_acceleration(0.0, 0.0, 0.0);
+    if (dt <= max_imu_gap_sec_) {
+      angular_acceleration = (angular_velocity - previous_angular_velocity_) / dt;
+    }
+    const tf2::Vector3 base_acceleration = acceleration_at_base_origin(
+      calibrated_acceleration, angular_velocity, angular_acceleration);
+
     if (dt <= max_imu_gap_sec_) {
       // Angular velocity is expressed in base_link. Right multiplication integrates this
       // body-frame rate into the base_link-to-odom orientation. Averaging adjacent samples
@@ -581,7 +624,7 @@ private:
       orientation_ = orientation_ * delta_quaternion(midpoint_angular_velocity, dt);
       orientation_.normalize();
       orientation_variance_ += angular_velocity_variance_ * dt * dt;
-      integrate_translation(calibrated_acceleration, dt);
+      integrate_translation(base_acceleration, dt);
     } else {
       linear_velocity_.setValue(0.0, 0.0, 0.0);
       filtered_translation_acceleration_.setValue(0.0, 0.0, 0.0);
@@ -593,7 +636,20 @@ private:
 
     previous_angular_velocity_ = angular_velocity;
     last_imu_stamp_ = stamp;
-    publish_outputs(stamp, angular_velocity, calibrated_acceleration);
+    publish_outputs(stamp, angular_velocity, base_acceleration);
+  }
+
+  tf2::Vector3 acceleration_at_base_origin(
+    const tf2::Vector3 & sensor_acceleration, const tf2::Vector3 & angular_velocity,
+    const tf2::Vector3 & angular_acceleration) const
+  {
+    // For an IMU at r from the base origin, a_sensor = a_base + alpha x r +
+    // omega x (omega x r). The same relation applies to specific force because gravity is
+    // common to both points on the rigid body.
+    const tf2::Vector3 lever_arm_acceleration =
+      angular_acceleration.cross(imu_position_offset_) +
+      angular_velocity.cross(angular_velocity.cross(imu_position_offset_));
+    return sensor_acceleration - lever_arm_acceleration;
   }
 
   bool update_imu_average(
@@ -1005,6 +1061,7 @@ private:
   double max_flow_angular_speed_rad_s_ = 0.30;
   double max_flow_linear_speed_m_s_ = 5.0;
   std::vector<double> flow_to_body_matrix_{0.0, -1.0, 1.0, 0.0};
+  tf2::Vector3 flow_position_offset_{0.0, 0.0, 0.0};
   double range_position_gain_ = 0.25;
   double range_velocity_gain_ = 0.20;
   double range_timeout_sec_ = 0.20;
@@ -1033,6 +1090,7 @@ private:
   uint64_t accepted_range_samples_ = 0;
 
   tf2::Quaternion imu_to_body_{tf2::Quaternion::getIdentity()};
+  tf2::Vector3 imu_position_offset_{0.0, 0.0, 0.0};
   tf2::Quaternion calibration_alignment_{tf2::Quaternion::getIdentity()};
   tf2::Quaternion orientation_{tf2::Quaternion::getIdentity()};
   tf2::Vector3 gyro_bias_{0.0, 0.0, 0.0};

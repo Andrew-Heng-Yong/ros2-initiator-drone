@@ -19,6 +19,10 @@ exactly once in the flow callback. This avoids scale and reversal errors caused 
 100 Hz flow velocity and integrating it from the independently timed IMU callback. Roll/pitch
 image motion is removed using the calibrated body angular rate before flow is rotated into
 `odom`; `flow_rotation_compensation_gain` tunes that correction and defaults to `1.0`.
+`flow_position_offset_m` specifies the vector from the `base_link` origin to the optical-flow
+sensor in metres, expressed as `[x forward, y left, z up]`. The estimator subtracts the sensor's
+rigid-body `angular_velocity x offset` before using flow as the velocity of `base_link`; this
+prevents an off-centre sensor from turning yaw/roll/pitch into apparent translation.
 
 The default `flow_radians_per_count: 0.0015` was measured from the dominant axis of a suspended
 swing recording on this airframe; `flow_to_body_matrix` is also mount-specific. At a fixed
@@ -101,6 +105,12 @@ The node rotates IMU samples from the mounted sensor frame into `base_link`, rem
 gyro bias, and integrates the midpoint of consecutive angular-rate samples. Translation uses the
 same published orientation seen by clients. The node does not integrate across out-of-order
 timestamps or gaps longer than `max_imu_gap_sec`.
+Set `imu_position_offset_m` to the vector in metres from the `base_link` origin to the IMU,
+expressed as `[x forward, y left, z up]`. The node estimates angular acceleration from consecutive
+gyro samples and removes both `angular_acceleration x offset` and the centripetal
+`angular_velocity x (angular_velocity x offset)` term. Consequently inertial translation and the
+base-framed `/imu/data_calibrated` acceleration refer to the drone origin rather than the IMU's
+mounting point. Both sensor offsets default to zero for backward compatibility.
 
 Build and run it directly:
 
