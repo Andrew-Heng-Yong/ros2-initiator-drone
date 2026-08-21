@@ -86,14 +86,9 @@ odom_node:
     minimum_range_vertical_projection: 0.50
     range_reference_distance_m: -1.0
 
-    # Rotation from the mounted IMU frame into base_link.
-    # The MPU6050 is mounted upside down: a stationary /imu/data_raw reads
-    # [0, 0, -9.8], so the board's +Z points at the floor. A 180 degree roll
-    # puts its axes back on base_link (x forward, y left, z up). Without this
-    # the gyro's pitch and yaw arrive negated, which is why lifting the robot's
-    # head made the app pitch the model down. Levelling cannot recover this on
-    # its own: gravity fixes tilt, never heading about gravity.
-    imu_to_body_rotation_rpy: [3.14159265358979, 0.0, 0.0]
+    # Rotation from the mounted IMU frame into base_link (x forward, y left,
+    # z up). 
+    imu_to_body_rotation_rpy: [0.0, 0.0, 0.0]
     # Vector from the base_link origin to the IMU, expressed in base_link axes.
     # Tangential and centripetal lever-arm acceleration are removed before
     # inertial translation is integrated and /imu/data_calibrated is published.
