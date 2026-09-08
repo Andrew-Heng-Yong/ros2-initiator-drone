@@ -46,7 +46,7 @@ class CalibrationTests(unittest.TestCase):
             self.assertIsNotNone(rotation)
             pairs.append((t0, t1, rotation))
         result = fit_calibration(
-            samples,
+            samples[::-1],
             pairs,
             offsets=np.arange(-0.02, 0.0201, 0.002),
             max_gap=0.2,

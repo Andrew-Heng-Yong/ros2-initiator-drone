@@ -52,6 +52,12 @@ def _kabsch(source, target):
 
 def _integrated_vector(samples, t0, t1, mount, scale, offset, max_gap):
     if isinstance(samples, np.ndarray) and samples.ndim == 2 and samples.shape[1] == 4:
+        # Keep interpolation neighbours; avoid re-parsing the whole recording
+        # for every short interval in each calibration trial.
+        start, end = sorted((t0 - offset, t1 - offset))
+        lo = max(0, np.searchsorted(samples[:, 0], start, side="left") - 1)
+        hi = np.searchsorted(samples[:, 0], end, side="right") + 1
+        samples = samples[lo:hi]
         samples = [(row[0], row[1:]) for row in samples]
     rotation = integrate_angular_velocity(
         samples,
@@ -148,6 +154,7 @@ def fit_calibration(
     pairs = list(visual_pairs)
     if samples.ndim != 2 or samples.shape[1] != 4 or not np.isfinite(samples).all():
         raise CalibrationError("gyro samples must be finite with shape (N, 4)")
+    samples = samples[np.argsort(samples[:, 0], kind="stable")]
     if len(pairs) < min_intervals:
         raise CalibrationError("insufficient_good_intervals")
     visual_vectors = np.asarray([_log_rotation(pair[2]) for pair in pairs])

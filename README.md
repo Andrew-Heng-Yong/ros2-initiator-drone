@@ -174,6 +174,14 @@ depth consistency, not ground-truth accuracy or successful reconstruction.
 New movement data is required to assess the faster capture pipeline. Gyro
 assistance remains disabled pending physical mounting and timing validation.
 
+The subsequent movement recording `20260908-164358` saved all 300 frames over
+65.3 seconds, including gyro data. Independent replay tracked 299 frames after
+initialization. The candidate in `config/gyro.json` fits mount rotation and a
+1.0134 scale with 0.372 degree RMS rotation disagreement on 149 held-out image
+intervals. Its timing estimate is +30 ms, but neighbouring offset fits are nearly
+tied. Assistance remains disabled pending validation; this residual measures
+agreement with visual estimates, not external rotation ground truth.
+
 For new recordings containing gyro metadata, run
 `python scripts/calibrate_gyro.py recordings/<sequence>` on the Mac. It estimates
 a candidate mount rotation, scale and time offset against independent visual
