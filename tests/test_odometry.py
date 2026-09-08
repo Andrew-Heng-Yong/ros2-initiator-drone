@@ -58,6 +58,22 @@ def _synthetic_rgbd():
 
 
 class RGBDOdometryTests(unittest.TestCase):
+    def test_depth_patch_median_matches_numpy_with_holes_and_edges(self):
+        odom = RGBDOdometry(np.eye(3))
+        depth = np.random.default_rng(5).uniform(0, 8, (8, 9)).astype(np.float32)
+        depth[::2, ::2] = np.nan
+        depth[0, :3] = [0, np.inf, -1]
+        for y in range(8):
+            for x in range(9):
+                patch = depth[max(0,y-1):y+2, max(0,x-1):x+2]
+                valid = patch[np.isfinite(patch) & (patch >= .2) & (patch <= 6)]
+                actual = odom._depth_at(depth, (x,y))
+                if valid.size:
+                    self.assertAlmostEqual(actual, float(np.median(valid)), places=6)
+                else:
+                    self.assertIsNone(actual)
+        self.assertIsNone(odom._depth_at(depth, (-1,0)))
+
     def test_rigid_ransac_rejects_outliers_and_preserves_metric_direction(self):
         rng = np.random.default_rng(9)
         source = rng.uniform([-1.0, -0.8, 2.5], [1.0, 0.8, 5.0], size=(60, 3))

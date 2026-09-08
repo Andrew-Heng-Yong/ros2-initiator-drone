@@ -598,15 +598,13 @@ class RGBDOdometry:
         # while keeping the operation bounded for Raspberry Pi frame rates.
         x0, x1 = max(0, x - 1), min(width, x + 2)
         y0, y1 = max(0, y - 1), min(height, y + 2)
-        patch = depth[y0:y1, x0:x1]
-        valid = patch[
-            np.isfinite(patch)
-            & (patch >= self.min_depth_m)
-            & (patch <= self.max_depth_m)
-        ]
-        if valid.size == 0:
+        # Nine scalar samples are cheaper than per-feature NumPy reductions on Pi.
+        valid = sorted(v for v in map(float, depth[y0:y1, x0:x1].flat)
+                       if math.isfinite(v) and self.min_depth_m <= v <= self.max_depth_m)
+        if not valid:
             return None
-        return float(np.median(valid))
+        middle = len(valid) // 2
+        return (valid[(len(valid)-1)//2] + valid[middle]) * 0.5
 
     def _backproject(self, pixel: Tuple[float, float], depth_m: float) -> np.ndarray:
         u, v = float(pixel[0]), float(pixel[1])
@@ -647,11 +645,13 @@ class RGBDOdometry:
             reference_pixel = reference_keypoints[match.queryIdx].pt
             current_pixel = current_keypoints[match.trainIdx].pt
             reference_z = self._depth_at(reference_depth, reference_pixel)
-            current_z = self._depth_at(depth, current_pixel)
             if reference_z is None:
                 continue
             pnp_reference_points.append(self._backproject(reference_pixel, reference_z))
             pnp_current_pixels.append(current_pixel)
+            if self.method == "pnp":
+                continue  # PnP uses reference depth and current image pixels only.
+            current_z = self._depth_at(depth, current_pixel)
             if current_z is None:
                 continue
             reference_points.append(self._backproject(reference_pixel, reference_z))

@@ -101,7 +101,7 @@ Dataset files and recordings are excluded from Git.
 
 ## Validation (2026-09-08)
 
-The 16 Python tests and the pipeline check pass on both the Mac and Pi
+The 17 Python tests and the pipeline check pass on both the Mac and Pi
 (OpenCV 5.0 / NumPy 2.5 on Mac; OpenCV 4.6 / NumPy 1.26 on Pi).
 The retained thermal driver's Pi colcon run passes all 6 reported tests.
 
@@ -120,8 +120,8 @@ No model training is required for either solver. Large dataset evaluation or
 future training belongs on the Mac.
 
 A 20-frame recording from this Gemini E was also evaluated on the Mac:
-PnP tracked 19/20 frames (one initialization), median 17.6 ms, maximum
-position variation 0.0008 m; SVD tracked 19/20, median 17.9 ms, variation
+PnP tracked 19/20 frames (one initialization), median 6.1 ms, maximum
+position variation 0.0008 m; SVD tracked 19/20, median 8.3 ms, variation
 0.0080 m. This is a stationary repeatability check, not ground-truth accuracy.
 The deployed portal passed live RGB/depth/thermal JPEG checks, PLY export,
 map reset, bounded recording, and a clean supervisor stop/restart. Browser
@@ -129,3 +129,16 @@ checks covered the three live tabs, camera-follow, scene fit and no console
 errors. The 20-frame recording remains on the Pi in
 `recordings/20260908-141011`; its Mac evaluation copy is in
 `/tmp/camera-gyro-live-recording`.
+
+The Pi's isolated replay of that same recording takes a median 76.3 ms per
+PnP frame (95th percentile 76.8 ms); SVD takes 106.3 ms. Replacing per-feature
+NumPy median allocations with a nine-sample scalar median and skipping
+unused current-depth sampling in PnP preserves the replay poses to within
+3e-8 per transform element on the Mac. Edge/hole median equivalence is tested.
+
+The final live portal check processed 3.36 paired frames/s with median
+104 ms processing time, maximum 118.5 ms, and 1.2 mm maximum stationary
+position variation over 12 seconds. All three feeds and PLY export passed;
+gyro bias was calibrated with zero I/O errors and rotation assistance disabled
+pending physical mount validation. Pairing and camera timing limit throughput
+below the configured 5 fps. This is a short stationary check, not a flight test.
