@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 import numpy as np
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from tracking.server import Tracker
@@ -30,6 +31,7 @@ def main():
     pose=tracker.pose.copy();cloud=tracker.mapper.points().copy()
     tracker.process(np.zeros_like(rgb),depth,K,2.4)
     assert tracker.snapshot()['status']=='lost'
+    assert tracker.last_stamp==2.2
     assert np.array_equal(tracker.pose,pose)
     assert np.array_equal(tracker.mapper.points(),cloud)
     tracker.process(rgb,depth,K,2.6)
@@ -54,7 +56,15 @@ def main():
             assert float(recording['sync_error'])==.02
             assert not bool(recording['gyro_bias_subtracted'])
             assert np.isnan(recording['gyro_bias_rad_s']).all()
-        tracker.record_dir=None
+    tracker.record_dir=None
+    with patch.object(gyro, 'relative_rotation', return_value=np.eye(3)) as rotation:
+        tracker.process(rgb,depth,K,3.2)
+        rotation.assert_called_once_with(3.,3.2)
+        assert tracker.snapshot()['metrics']['gyro_prior']
+        rotation.reset_mock()
+        tracker.process(rgb,depth,K,4.3)
+        rotation.assert_not_called()
+        assert not tracker.snapshot()['metrics']['gyro_prior']
     print('PASS: calibration, live pipeline, map, lost freeze, recovery, stale and reset')
 
 

@@ -7,6 +7,8 @@ camera tracking can continue with ``relative_rotation`` returning ``None``.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+
 import fcntl
 import os
 import struct
@@ -633,6 +635,11 @@ class Gyro:
             rotation = self._rotation.copy()
             scale = 1.0  # samples are already converted and tuned in _read_sample.
             max_gap = self._max_gap
+        # Retain interpolation neighbours without re-validating 30 s of history
+        # for every short frame increment on the Pi.
+        start, end = sorted((_timestamp_seconds(t0), _timestamp_seconds(t1)))
+        times = [sample.timestamp for sample in samples]
+        samples = samples[max(0, bisect_left(times, start)-1):bisect_right(times, end)+1]
         return integrate_angular_velocity(
             samples,
             t0,

@@ -519,6 +519,10 @@ class RGBDOdometry:
 
         return self._reference_timestamp
 
+    def rotation_prior_from_increment(self, increment: np.ndarray) -> np.ndarray:
+        """Anchor a last-accepted-to-current gyro increment to the visual keyframe."""
+        return self._reference_pose[:3, :3].T @ self._pose[:3, :3] @ _rotation_from_prior(increment)
+
     def _set_reference(
         self,
         rgb,

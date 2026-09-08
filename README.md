@@ -51,25 +51,16 @@ factory intrinsics. See [camera setup](DEPTH_CAMERA_DRIVER_SETUP.md).
 ## Gyro calibration
 
 Keep the module stationary for three seconds at startup. The portal distinguishes
-Calibrated · not fused from Assisting. A stable bias does not prove rotational
-scale, mounting or camera timestamp alignment. To enable assistance after testing
-known rotations, pass `--gyro-config config/gyro.json`; use this structure:
+Calibrated · not fused, Ready, and Assisting. Assisting means the current frame
+received a gyro rotation prior. The validated configuration for this physical rig
+is [config/gyro.json](config/gyro.json), loaded automatically when present; override
+it with `--gyro-config PATH`. Recalibrate if the relative sensor mounting changes.
 
-```json
-{
-  "enabled": false,
-  "mounting_validated": false,
-  "rotation_camera_from_gyro": [[1,0,0],[0,1,0],[0,0,1]],
-  "range_dps": 500,
-  "scale": 1.0,
-  "time_offset": 0.0
-}
-```
-
-Replace the identity with the measured mount rotation and validate positive and
-negative rotations on every axis before setting both flags true. Time offset is
-added to gyro timestamps. Gaps and stale hardware invalidate rotation assistance.
-There is no acceleration-based fallback.
+Assistance integrates from the last accepted visual pose, for at most one second,
+and expresses that prediction in the active visual keyframe. Each accepted visual
+pose corrects accumulated drift. Gaps, stale hardware, and longer visual losses
+disable the prior; the usual RGB-D checks still decide whether to accept a pose.
+Time offset is added to gyro timestamps. There is no acceleration-based fallback.
 
 ## Development and evaluation on the Mac
 
@@ -104,7 +95,7 @@ Dataset files and recordings are excluded from Git.
 
 ## Validation (2026-09-08)
 
-The 20 runtime unit tests and the pipeline check pass on both the Mac and Pi
+The 22 runtime unit tests and the pipeline check pass on both the Mac and Pi
 (OpenCV 5.0 / NumPy 2.5 on Mac; OpenCV 4.6 / NumPy 1.26 on Pi).
 Three additional offline calibration checks pass on the Mac; run calibration there.
 The retained thermal driver's Pi colcon run passes all 6 reported tests.
@@ -118,8 +109,8 @@ frames, with only the initial camera frame used for alignment:
 | TUM fr1_xyz, stride 6, 133 frames | 126 | 127 | 0.0508 m | 0.0744 m |
 
 [TUM RGB-D](https://cvg.cit.tum.de/data/datasets/rgbd-dataset/file_formats) is a different camera and scene. These results do not establish accuracy
-on this module. The initial stationary Pi comparison favored PnP; movement
-accuracy and gyro mounting/timing still require physical motion validation.
+on this module. The initial stationary Pi comparison favored PnP; the later
+module-specific movement and gyro checks are described below.
 No model training is required for either solver. Large dataset evaluation or
 future training belongs on the Mac.
 
@@ -171,16 +162,33 @@ against the most recent accepted view. On the old movement recording it accepts
 adjacent accepted pairs, median depth disagreement drops from 20 mm to 2.4 mm and
 the worst from 245 mm to 65 mm, but the compared subsets differ. This measures
 depth consistency, not ground-truth accuracy or successful reconstruction.
-New movement data is required to assess the faster capture pipeline. Gyro
-assistance remains disabled pending physical mounting and timing validation.
+This old recording cannot assess the faster capture pipeline; the subsequent
+recording below does. Gyro assistance was disabled during that capture.
 
 The subsequent movement recording `20260908-164358` saved all 300 frames over
 65.3 seconds, including gyro data. Independent replay tracked 299 frames after
 initialization. The candidate in `config/gyro.json` fits mount rotation and a
 1.0134 scale with 0.372 degree RMS rotation disagreement on 149 held-out image
 intervals. Its timing estimate is +30 ms, but neighbouring offset fits are nearly
-tied. Assistance remains disabled pending validation; this residual measures
-agreement with visual estimates, not external rotation ground truth.
+tied. This residual measures agreement with visual estimates, not external
+rotation ground truth.
+
+Validation covered positive and negative motion about all three axes, plus the
+separate 19-frame recording `20260908-164516`. Assisted and visual-only replay
+both track 299/300 movement frames, with unchanged median depth disagreement
+(21.35 mm). The largest difference between their estimated positions is 0.056 mm.
+That establishes non-regression on this sequence, not an improvement in accuracy.
+Uncorrected gyro integration across 65 seconds diverges from visual orientation
+by 9.53 degrees; the runtime therefore uses short increments anchored to accepted
+visual poses. No return-to-start position or orientation is assumed.
+
+Assistance is enabled for this rig. Reproduce the checks on the Mac with
+`python scripts/validate_gyro.py RECORDING config/gyro.json`.
+The numerical results are in [config/gyro-validation.json](config/gyro-validation.json).
+The enabled Pi check supplied gyro priors on all 65 sampled updates over
+25 seconds, at 5.69 processed frames/s. Median gyro work was 6.9 ms inside
+152.5 ms total processing, with no gyro I/O errors. This live check was stationary;
+the movement comparison above was replayed on the Mac.
 
 For new recordings containing gyro metadata, run
 `python scripts/calibrate_gyro.py recordings/<sequence>` on the Mac. It estimates

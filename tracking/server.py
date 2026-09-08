@@ -82,11 +82,17 @@ class Tracker:
                 self.map_version += 1
                 self.map_pose = None
             prior = None
-            reference_stamp = getattr(self.odom, 'reference_timestamp', None)
-            if self.gyro and reference_stamp is not None:
-                prior = self.gyro.relative_rotation(reference_stamp, stamp)
+            gyro_start = time.monotonic()
+            # Anchor each short gyro increment to the last accepted visual pose.
+            # A long-lived keyframe must not accumulate uncorrected gyro drift.
+            if self.gyro and self.last_stamp is not None and 0 < stamp-self.last_stamp <= 1.:
+                increment = self.gyro.relative_rotation(self.last_stamp, stamp)
+                if increment is not None:
+                    prior = self.odom.rotation_prior_from_increment(increment)
+            gyro_ms = (time.monotonic()-gyro_start)*1000
             result = self.odom.update(rgb, depth, stamp, rotation_prior=prior)
-            self.last_stamp = stamp
+            if result['status'] in ('tracking', 'initializing'):
+                self.last_stamp = stamp
             self.status = result['status']
             self.reason = {'initializing': 'Establishing visual reference', 'tracking': 'RGB-D tracking', 'lost': 'Tracking lost · return to a previously seen view'}.get(self.status, self.status)
             self.pose = np.asarray(result['pose'])
@@ -102,6 +108,7 @@ class Tracker:
             self.metrics.update(inliers=int(result.get('inliers', 0)), matches=int(result.get('matches', 0)),
                                 rmse=result.get('rmse'), solver=result.get('solver'),
                                 rmse_unit='pixels' if result.get('solver')=='pnp' else 'metres',
+                                gyro_prior=prior is not None, gyro_ms=round(gyro_ms, 1),
                                 sync_ms=round(sync_error*1000, 1),
                                 valid_depth_percent=round(float(np.mean(np.isfinite(depth) & (depth>.2) & (depth<6)))*100, 1))
             if self.record_dir and self.record_count < 300:
@@ -309,7 +316,8 @@ def main():
     parser.add_argument('--port', default=8080, type=int)
     parser.add_argument('--method', choices=['svd','pnp'], default='pnp')
     parser.add_argument('--demo', action='store_true')
-    parser.add_argument('--gyro-config', type=Path)
+    default_gyro = ROOT/'config'/'gyro.json'
+    parser.add_argument('--gyro-config', type=Path, default=default_gyro if default_gyro.is_file() else None)
     args = parser.parse_args()
     cv2.setNumThreads(2)
     gyro = None

@@ -1,0 +1,193 @@
+{
+  "date": "2026-09-08",
+  "method": "RGB-D rotation agreement; no position or orientation return-to-start constraint; no external ground truth",
+  "calibration": {
+    "enabled": true,
+    "mounting_validated": true,
+    "rotation_camera_from_gyro": [
+      [
+        0.01948016374729088,
+        -0.9997487517175622,
+        0.011088582396125932
+      ],
+      [
+        0.014674022178300963,
+        -0.010803603322290288,
+        -0.9998339638301779
+      ],
+      [
+        0.9997025539096562,
+        0.019639643439521313,
+        0.01445987939365327
+      ]
+    ],
+    "scale": 1.0133851769353326,
+    "time_offset": 0.03,
+    "range_dps": 500
+  },
+  "replays": [
+    {
+      "recording": "20260908-164358",
+      "heldout_intervals": 149,
+      "heldout_rmse_deg": 0.37174729927790856,
+      "axes": {
+        "x-1": {
+          "intervals": 18,
+          "correct_direction": 18,
+          "rmse_deg": 0.6405410492268053
+        },
+        "x+1": {
+          "intervals": 24,
+          "correct_direction": 24,
+          "rmse_deg": 0.30030998578567863
+        },
+        "y-1": {
+          "intervals": 25,
+          "correct_direction": 24,
+          "rmse_deg": 0.3251160234768062
+        },
+        "y+1": {
+          "intervals": 34,
+          "correct_direction": 34,
+          "rmse_deg": 0.25201948189759704
+        },
+        "z-1": {
+          "intervals": 9,
+          "correct_direction": 9,
+          "rmse_deg": 0.3669017940815398
+        },
+        "z+1": {
+          "intervals": 13,
+          "correct_direction": 11,
+          "rmse_deg": 0.5825942402810861
+        }
+      },
+      "timing_rmse_deg": {
+        "0.0": 0.3938515680669416,
+        "0.02": 0.37347175598554844,
+        "0.025": 0.3717579578761034,
+        "0.03": 0.37174729927790856,
+        "0.035": 0.37347792195771723,
+        "0.04": 0.37703937892128986,
+        "0.05": 0.3891259213909613
+      },
+      "visual": {
+        "tracked": 299,
+        "frames": 300,
+        "priors": 0,
+        "solver_p50_ms": 6.0311040142551064,
+        "depth_pairs": 263,
+        "median_depth_error_m": 0.021352476800598263,
+        "worst_depth_error_m": 0.046295988046090475
+      },
+      "assisted": {
+        "tracked": 299,
+        "frames": 300,
+        "priors": 299,
+        "solver_p50_ms": 5.96285454230383,
+        "depth_pairs": 263,
+        "median_depth_error_m": 0.02135247680059804,
+        "worst_depth_error_m": 0.046295864698032485
+      },
+      "assisted_vs_visual": {
+        "max_rotation_difference_deg": 0.0014537105370152482,
+        "max_position_difference_m": 5.561080522193496e-05
+      },
+      "cumulative_gyro_vs_visual": {
+        "max_deg": 9.8127627012751,
+        "final_deg": 9.52654386412268
+      }
+    },
+    {
+      "recording": "20260908-164516",
+      "heldout_intervals": 8,
+      "heldout_rmse_deg": 0.03715952423307921,
+      "axes": {
+        "x-1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        },
+        "x+1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        },
+        "y-1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        },
+        "y+1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        },
+        "z-1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        },
+        "z+1": {
+          "intervals": 0,
+          "correct_direction": 0,
+          "rmse_deg": null
+        }
+      },
+      "timing_rmse_deg": {
+        "0.0": 0.0369003966294364,
+        "0.02": 0.03708863561216381,
+        "0.025": 0.03711851255236178,
+        "0.03": 0.03715952423307921,
+        "0.035": 0.037191567737735236,
+        "0.04": 0.03722622078218774,
+        "0.05": 0.037347990342463264
+      },
+      "visual": {
+        "tracked": 18,
+        "frames": 19,
+        "priors": 0,
+        "solver_p50_ms": 6.835417007096112,
+        "depth_pairs": 18,
+        "median_depth_error_m": 0.027217227386368337,
+        "worst_depth_error_m": 0.02811770821060522
+      },
+      "assisted": {
+        "tracked": 18,
+        "frames": 19,
+        "priors": 18,
+        "solver_p50_ms": 6.673750001937151,
+        "depth_pairs": 18,
+        "median_depth_error_m": 0.027218731834629806,
+        "worst_depth_error_m": 0.028108312718029382
+      },
+      "assisted_vs_visual": {
+        "max_rotation_difference_deg": 0.0007097524615905745,
+        "max_position_difference_m": 2.2718061907272875e-05
+      },
+      "cumulative_gyro_vs_visual": {
+        "max_deg": 0.48524354302715683,
+        "final_deg": 0.48524354302715683
+      }
+    }
+  ],
+  "live": {
+    "samples": 65,
+    "status_counts": {
+      "tracking": 65
+    },
+    "processed_fps": 5.693474518402727,
+    "processing_p50_ms": 152.5,
+    "gyro_p50_ms": 6.9,
+    "gyro_prior_samples": 65,
+    "max_age_s": 0.17537474632263184,
+    "gyro_errors": 0,
+    "gyro_config": {
+      "enabled": true,
+      "mounting_validated": true,
+      "fusion_ready": true,
+      "scale": 1.0133851769353326,
+      "time_offset_s": 0.03
+    }
+  }
+}

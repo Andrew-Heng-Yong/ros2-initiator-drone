@@ -102,7 +102,7 @@ async function poll(){
     ['x','y','z'].forEach((id,i)=>$(id).textContent=state.frame?state.pose[i][3].toFixed(3):'—');
     $('inliers').textContent=`${state.metrics.inliers??0} / ${state.metrics.matches??0}`;
     $('latency').textContent=state.metrics.processing_ms!==undefined?`${state.metrics.processing_ms} ms`:'—';
-    $('gyro').textContent=state.gyro.fusion_ready?'Assisting':state.gyro.calibrated?'Calibrated · not fused':state.gyro.state??'Unavailable';
+    $('gyro').textContent=state.metrics.gyro_prior?'Assisting':state.gyro.fusion_ready?'Ready':state.gyro.calibrated?'Calibrated · not fused':state.gyro.state??'Unavailable';
     $('point-count').textContent=`${state.points.toLocaleString()} mapped points`;
     $('record').textContent=state.recording?'Stop recording':'Record sequence';
     $('action-status').textContent=state.recording?`Recording · ${state.recorded_frames} / 300 frames`:state.recorded_frames?`${state.recorded_frames} frames saved on module`:'';

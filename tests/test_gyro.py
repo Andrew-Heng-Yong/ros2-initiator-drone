@@ -17,6 +17,22 @@ from tracking.gyro import Gyro, integrate_angular_velocity, so3_exp, stationary_
 
 
 class GyroMathTests(unittest.TestCase):
+    def test_live_rotation_uses_corrected_rates_and_timestamps_once(self) -> None:
+        mount = so3_exp([0., 0., np.pi/2])
+        gyro = Gyro(enabled=True, mounting_validated=True, scale=1.2, time_offset=.03,
+                    rotation_camera_from_gyro=mount, calibration_duration=.1)
+        for i in range(301):
+            # Simulate _read_sample output, whose scale and offset are applied already.
+            gyro.inject_sample(i*.01+.03, np.array([.3 if i>100 else 0., 0., .01])*1.2)
+        gyro._configured = True  # Simulate a connected device without I2C access.
+        with patch.object(gyro_module.time, 'time', return_value=3.):
+            result = gyro.relative_rotation(2.83, 3.03)
+            np.testing.assert_allclose(result, so3_exp(mount @ [.36*.2, 0., 0.]), atol=1e-10)
+            self.assertIsNone(gyro.relative_rotation(2.83, 3.1))
+        with patch.object(gyro_module.time, 'time', return_value=5.):
+            self.assertIsNone(gyro.relative_rotation(2.83, 3.03))
+        gyro.close()
+
     def test_known_z_axis_rotation(self) -> None:
         angle = np.pi / 2.0
         result = integrate_angular_velocity(

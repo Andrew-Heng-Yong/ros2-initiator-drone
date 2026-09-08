@@ -58,6 +58,15 @@ def _synthetic_rgbd():
 
 
 class RGBDOdometryTests(unittest.TestCase):
+    def test_gyro_increment_is_anchored_to_last_visual_pose(self) -> None:
+        odom = RGBDOdometry(np.eye(3))
+        reference = cv2.Rodrigues(np.array([0., 0., np.pi/2]))[0]
+        previous = cv2.Rodrigues(np.array([.3, 0., 0.]))[0]
+        odom._reference_pose[:3, :3] = reference
+        odom._pose[:3, :3] = reference @ previous
+        # Undo the motion since the keyframe, despite a rotated world reference.
+        np.testing.assert_allclose(odom.rotation_prior_from_increment(previous.T), np.eye(3), atol=1e-12)
+
     def test_depth_patch_median_matches_numpy_with_holes_and_edges(self):
         odom = RGBDOdometry(np.eye(3))
         depth = np.random.default_rng(5).uniform(0, 8, (8, 9)).astype(np.float32)

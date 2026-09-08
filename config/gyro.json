@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "mounting_validated": false,
+  "enabled": true,
+  "mounting_validated": true,
   "rotation_camera_from_gyro": [
     [
       0.01948016374729088,
