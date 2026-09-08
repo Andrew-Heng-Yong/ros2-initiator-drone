@@ -11,6 +11,7 @@ USB thermal driver is retained; the Orbbec driver stays in its own workspace.
   is never read. Bias is calibrated while stationary; rotation assistance is
   available only after mounting, scale and timing validation.
 - MI0802 thermal imagery has its own portal tab. It is not assumed to align with RGB.
+  The launcher flips thermal rows vertically for this module's mounting.
 - The portal shows the camera frustum, trajectory, a bounded coloured point cloud,
   tracking health and the three camera feeds. Maps export as PLY.
 

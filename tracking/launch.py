@@ -23,7 +23,8 @@ def main():
         ('camera',['ros2','run','orbbec_camera','orbbec_camera_node','--ros-args',
                    '-r','__node:=camera','-r','__ns:=/camera']
                   +[arg for value in camera_parameters for arg in ('-p',value)]),
-        ('thermal',['ros2','run','mi0802_senxor_driver','mi0802_senxor_node']),
+        ('thermal',['ros2','run','mi0802_senxor_driver','mi0802_senxor_node',
+                    '--ros-args','-p','flip_vertical:=true']),
         ('portal',[sys.executable,'-m','tracking.server',*sys.argv[1:]])]
     processes=[]
     def stopped(*_):
