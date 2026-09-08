@@ -1,0 +1,8 @@
+{
+  "revision": "legacy-fov-approximate-v1",
+  "offset_x": 0.0, "offset_y": 0.0, "scale": 0.85,
+  "barrel_distortion": -0.2, "stretch_x": 0.9, "stretch_y": 1.0,
+  "thermal_hfov": 90.0, "thermal_vfov": 68.0,
+  "offset_reference_width": 640, "offset_reference_height": 480,
+  "flip_x": true, "flip_y": false
+}

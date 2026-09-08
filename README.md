@@ -203,3 +203,37 @@ RGB/depth/thermal JPEGs, the scene buffer and PLY export passed. A new 12-frame
 stationary recording (`20260908-154823`) contains valid gyro histories and bias
 metadata, no partial files, and a maximum frame interval of 336 ms. These checks
 verify the capture repair, not movement-map quality.
+
+## Phone-powered reconstruction
+
+Run `bash scripts/run.sh --host 0.0.0.0 --processing phone` to retain capture,
+registration, previews, gyro calibration and recording while skipping Pi odometry
+and mapping. `--processing pi` (the default) retains the existing portal behaviour.
+The native DroneView app's **Thermal AR** tab consumes the stream over Wi-Fi.
+Phone maps are not relayed to the web portal in this version.
+
+- `GET /api/sensors`: newest complete DVS1 packet, or 503 before the first pair.
+  Four ASCII magic bytes, uint32 little-endian JSON length, UTF-8 JSON, JPEG RGB,
+  little-endian float32 depth in metres, then float32 thermal in Celsius.
+  The JSON includes byte counts, dimensions, row-major K, frame/session IDs,
+  individual Unix capture timestamps, gyro samples/calibration, image flip and
+  approximate thermal alignment metadata. Numeric depth holes remain NaN.
+  Clients keep one request outstanding and discard repeated sequence numbers.
+- `GET /api/clock`: current Unix timestamp for midpoint clock-offset estimation.
+- `POST /api/poses`: JSON session, capture timestamp, validity, and column-major
+  `phone_pose` / `rig_pose` rigid matrices in the phone's AR world. Bodies are
+  bounded to 4096 bytes; invalid/stale/out-of-order/wrong-session poses return 400.
+  `/api/state.remote_poses` automatically becomes invalid after two seconds.
+- `--thermal-alignment PATH`: load existing hand-tuned alignment in the format
+  of `config/thermal-alignment.json`. Defaults come from the previous frontend's
+  master parameters; they are approximate FOV mapping, not measured extrinsics.
+
+New recordings also retain numeric thermal frames, thermal timestamps and sensor
+session IDs. Disconnecting/backgrounding the phone does not stop recording.
+Map reset or camera-intrinsics changes create a new sensor session. Live streams
+never silently substitute simulated frames; demo packets are explicitly labelled.
+
+Validation: `python -m unittest discover -s tests` includes lossless packet,
+recording, session reset and pose-rejection checks. Throughput and AR alignment
+must additionally be measured on the actual phone/rig; build success is not an
+accuracy or sustained-FPS result.

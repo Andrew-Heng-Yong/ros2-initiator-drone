@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import cv2
 import numpy as np
 
+from .sensor_stream import SensorStream
 from .mapping import SceneMap
 from .odometry import RGBDOdometry
 
@@ -19,9 +20,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Tracker:
-    def __init__(self, method='pnp', gyro=None, demo=False):
+    def __init__(self, method='pnp', gyro=None, demo=False, processing='pi', alignment=None):
         # ponytail: one processing lock; separate snapshots if HTTP latency becomes limiting.
         self.lock = threading.RLock()
+        self.processing = processing
+        self.stream = SensorStream(alignment, demo)
+        self.temperatures = None
+        self.thermal_stamp = None
         self.method, self.gyro, self.demo = method, gyro, demo
         self.mapper = SceneMap()
         self.odom = None
@@ -47,7 +52,10 @@ class Tracker:
                 self.images[name] = jpeg.tobytes()
                 self.image_times[name] = time.time()
 
-    def thermal(self, temperatures):
+    def thermal(self, temperatures, stamp=None):
+        with self.lock:
+            self.temperatures = np.asarray(temperatures, dtype='<f4').copy()
+            self.thermal_stamp = time.time() if stamp is None else stamp
         valid = np.isfinite(temperatures)
         if not valid.any():
             return
@@ -70,6 +78,29 @@ class Tracker:
                 return
             if rgb.shape[:2] != depth.shape:
                 self.status, self.reason = 'uncalibrated', 'Depth must be registered to RGB'
+                return
+            if self.reset_requested or (self.K is not None and not np.allclose(K, self.K)):
+                self.stream.reset()
+            gyro_payload = {}
+            if self.gyro:
+                snap = self.gyro.recording_snapshot()
+                samples = np.asarray(snap['samples'])
+                samples = samples[samples[:, 0] >= stamp-1.2] if len(samples) else samples
+                status = self.gyro.status()
+                gyro_payload = dict(samples=samples.tolist(),
+                                    bias=np.nan_to_num(snap['bias_rad_s']).tolist(),
+                                    ready=status.get('fusion_ready', False),
+                                    rotation=status.get('rotation_camera_from_gyro', np.eye(3).tolist()))
+            self.stream.publish(self.images['rgb'], depth, K, stamp,
+                                stamp if depth_stamp is None else depth_stamp,
+                                self.temperatures, self.thermal_stamp, gyro_payload)
+            if self.processing == 'phone':
+                self.K = K.copy()
+                self.reset_requested = False
+                self.sequence += 1
+                self.status, self.reason = 'streaming', 'Phone processing · Pi captures and records'
+                self.record_frame(rgb, depth, K, stamp, depth_stamp, sync_error)
+                self.metrics['processing_ms'] = round((time.monotonic()-start)*1000, 1)
                 return
             if self.odom is None or self.reset_requested or not np.allclose(K, self.K):
                 self.odom = RGBDOdometry(K, method=self.method)
@@ -111,27 +142,32 @@ class Tracker:
                                 gyro_prior=prior is not None, gyro_ms=round(gyro_ms, 1),
                                 sync_ms=round(sync_error*1000, 1),
                                 valid_depth_percent=round(float(np.mean(np.isfinite(depth) & (depth>.2) & (depth<6)))*100, 1))
-            if self.record_dir and self.record_count < 300:
-                sensors = {'gyro_'+k: v for k,v in self.gyro.recording_snapshot().items()} if self.gyro else {}
-                # Compression cost ~112 ms/frame on Pi versus ~15 ms for raw NPZ.
-                target = self.record_dir / f'{self.record_count:05d}.npz'
-                temporary = target.with_suffix('.npz.part')
-                with temporary.open('wb') as stream:
-                    np.savez(stream, rgb=rgb, depth=depth, K=K, timestamp=stamp,
-                             depth_timestamp=stamp if depth_stamp is None else depth_stamp,
-                             sync_error=sync_error, pose=self.pose, tracking_status=self.status,
-                             **sensors)
-                temporary.replace(target)
-                self.record_count += 1
-                if self.record_count == 300:
-                    self.record_dir = None
+            self.record_frame(rgb, depth, K, stamp, depth_stamp, sync_error)
             self.metrics['processing_ms'] = round((time.monotonic()-start)*1000, 1)
+
+    def record_frame(self, rgb, depth, K, stamp, depth_stamp, sync_error):
+        if self.record_dir and self.record_count < 300:
+            sensors = {'gyro_'+k: v for k,v in self.gyro.recording_snapshot().items()} if self.gyro else {}
+            # Compression cost ~112 ms/frame on Pi versus ~15 ms for raw NPZ.
+            target = self.record_dir / f'{self.record_count:05d}.npz'
+            temporary = target.with_suffix('.npz.part')
+            with temporary.open('wb') as stream:
+                np.savez(stream, rgb=rgb, depth=depth, K=K, timestamp=stamp,
+                         depth_timestamp=stamp if depth_stamp is None else depth_stamp,
+                         sync_error=sync_error, pose=self.pose, tracking_status=self.status,
+                         thermal=self.temperatures if self.temperatures is not None else np.empty((0,0)),
+                         thermal_timestamp=self.thermal_stamp if self.thermal_stamp is not None else np.nan,
+                         sensor_session=self.stream.session, **sensors)
+            temporary.replace(target)
+            self.record_count += 1
+            if self.record_count == 300:
+                self.record_dir = None
 
     def snapshot(self):
         with self.lock:
             age = time.time()-self.last_frame if self.last_frame else None
             stale = age is not None and age > 2
-            return dict(status='stale' if stale else self.status, reason='Camera frames stopped' if stale else self.reason,
+            return dict(processing=self.processing, sensor_session=self.stream.session, remote_poses=self.stream.pose_snapshot(), status='stale' if stale else self.status, reason='Camera frames stopped' if stale else self.reason,
                         mode='demo' if self.demo else 'live', method=self.method, pose=self.pose.tolist(),
                         trajectory=list(self.path), frame=self.sequence, map_version=self.map_version,
                         points=len(self.mapper), age=age, metrics=self.metrics.copy(),
@@ -188,7 +224,7 @@ def run_ros(tracker, stop):
                 thermal_msg = pending_thermal.pop() if pending_thermal else None
             if thermal_msg is not None:
                 try:
-                    tracker.thermal(bridge.imgmsg_to_cv2(thermal_msg, 'passthrough'))
+                    tracker.thermal(bridge.imgmsg_to_cv2(thermal_msg, 'passthrough'), thermal_msg.header.stamp.sec + thermal_msg.header.stamp.nanosec*1e-9)
                 except Exception as error:
                     node.get_logger().error('Thermal preview: '+str(error))
             if pair is None:
@@ -260,6 +296,12 @@ def handler_for(tracker):
 
         def do_GET(self):
             path = urlsplit(self.path).path
+            if path == '/api/sensors':
+                with tracker.lock:
+                    payload = tracker.stream.packet
+                return self.reply(payload or b'Waiting for sensors', 'application/octet-stream', 200 if payload else 503)
+            if path == '/api/clock':
+                return self.reply(json.dumps(dict(timestamp=time.time())).encode(), 'application/json')
             if path == '/api/state':
                 state = tracker.snapshot()
                 # Invalid fits have no numerical residual; JSON never emits NaN/Infinity.
@@ -293,6 +335,20 @@ def handler_for(tracker):
                 return self.reply(b'Origin rejected','text/plain',403)
             if self.headers.get('Content-Type') != 'application/json':
                 return self.reply(b'Expected application/json','text/plain',415)
+            if self.path == '/api/poses':
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < length <= 4096:
+                        raise ValueError('Invalid body length')
+                    self.connection.settimeout(2)
+                    value = json.loads(self.rfile.read(length))
+                    if not isinstance(value, dict):
+                        raise ValueError('Expected object')
+                    with tracker.lock:
+                        tracker.stream.accept_poses(value)
+                    return self.reply(b'{}', 'application/json')
+                except (ValueError, TypeError, OSError):
+                    return self.reply(b'Invalid, stale or wrong-session pose', 'text/plain', 400)
             if self.path == '/api/reset':
                 with tracker.lock:
                     tracker.reset_requested = True
@@ -315,6 +371,8 @@ def main():
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', default=8080, type=int)
     parser.add_argument('--method', choices=['svd','pnp'], default='pnp')
+    parser.add_argument('--processing', choices=['pi', 'phone'], default='pi')
+    parser.add_argument('--thermal-alignment', type=Path, default=ROOT/'config'/'thermal-alignment.json')
     parser.add_argument('--demo', action='store_true')
     default_gyro = ROOT/'config'/'gyro.json'
     parser.add_argument('--gyro-config', type=Path, default=default_gyro if default_gyro.is_file() else None)
@@ -326,7 +384,8 @@ def main():
         config = json.loads(args.gyro_config.read_text()) if args.gyro_config else {}
         gyro = Gyro(**config)
         gyro.start()
-    tracker = Tracker(args.method, gyro, args.demo)
+    alignment = json.loads(args.thermal_alignment.read_text()) if args.thermal_alignment.is_file() else {}
+    tracker = Tracker(args.method, gyro, args.demo, args.processing, alignment)
     stop = threading.Event()
     def capture():
         try:
