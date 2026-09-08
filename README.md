@@ -1,172 +1,131 @@
-# ROS 2 initiator drone
+# Camera + Gyro
 
-This workspace is split into top-level control, localization, and sensor packages:
+Local 6-DoF camera tracking, a coloured 3D point cloud, and a small web portal.
+This branch replaces the old inertial/flow estimator and dashboard. The MI0802
+USB thermal driver is retained; the Orbbec driver stays in its own workspace.
 
-- `src/drone_control`: main drone launch/orchestration package.
-- `src/sensors/mi0802_senxor_driver`: C++ ROS 2 driver for a Meridian Innovation MI0802 SenXor over USB CDC ACM.
-- `src/sensors/mlx90640_node`: C++ ROS 2 driver for an MLX90640 32x24 thermal array over Linux I2C, plus an optional thermal-on-camera overlay.
-- `src/sensors/mpu6050_node`: C++ ROS 2 driver for an MPU6050 accelerometer/gyroscope over Linux I2C.
-- `src/sensors/flow_range_sensor_node`: C++ ROS 2 driver for the ALIENTEK PMW3901 optical-flow sensor over SPI and VL53L1X 4 m rangefinder over I2C.
-- `src/localization/odom_node`: IMU dead-reckoning odometry publishing `/odom` and `odom -> base_link`.
+## Inputs and outputs
 
-`mlx90640_node` contains the Apache-2.0 Melexis calibration API and does not depend on Python, CircuitPython, or a virtual environment.
+- RGB + registered depth estimate camera position and orientation in metres.
+- MPU6050 **gyroscope only** supplies timestamped angular rates. Its accelerometer
+  is never read. Bias is calibrated while stationary; rotation assistance is
+  available only after mounting, scale and timing validation.
+- MI0802 thermal imagery has its own portal tab. It is not assumed to align with RGB.
+- The portal shows the camera frustum, trajectory, a bounded coloured point cloud,
+  tracking health and the three camera feeds. Maps export as PLY.
 
-## Run on the Raspberry Pi
+The reference frame is the initial RGB optical frame: X right, Y down, Z forward.
+The displayed pose maps current camera coordinates into that frame. It is not
+gravity aligned. Visual odometry drifts; this is not a globally corrected SLAM map.
+Lost/stale tracking retains the last accepted pose and stops adding scene points.
+Return to a retained view to recover, or start a new map explicitly.
 
-Verify the MI0802 serial device and the MPU6050 at `0x68` are visible:
+## Raspberry Pi setup
+
+Ubuntu + ROS 2 Jazzy and the existing Orbbec workspace are required. Install the
+Python packages from Ubuntu so cv_bridge and NumPy use compatible ABIs:
 
 ```bash
-ls -l /dev/ttyACM0 /dev/serial/by-id/usb-Nuvoton_USB_Virtual_COM-if00
-sudo i2cdetect -y 1
-```
-
-Build the top-level control package and its workspace dependencies:
-
-```bash
+sudo apt install python3-numpy python3-opencv ros-jazzy-cv-bridge
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to drone_control
-source install/setup.bash
+colcon build --packages-select mi0802_senxor_driver
+bash scripts/run.sh --host 0.0.0.0
 ```
 
-If colcon still looks for the old `src/mlx90640_node` path after the package
-move to `src/sensors/mlx90640_node`, clear the stale CMake package build caches
-and rebuild:
+Open **http://192.168.1.6:8080** for the current Pi. `--host 0.0.0.0` exposes
+camera feeds and the map to the local network and was explicitly approved for
+this setup. Omit it to bind only to Pi localhost; then on the Mac use:
 
 ```bash
-cd ~/ros2-initiator-drone
-rm -rf build/mlx90640_node build/drone_control install/mlx90640_node install/drone_control
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to drone_control
-source install/setup.bash
+ssh -N -L 8081:127.0.0.1:8080 andrew@192.168.1.6
 ```
 
-For Orbbec Gemini E / Dabai-style depth camera setup, read `DEPTH_CAMERA_DRIVER_SETUP.md`.
+Open `http://127.0.0.1:8081`. No cloud service or internet connection is needed
+at runtime. Three.js and orbit controls are bundled with their MIT licence.
+Ctrl+C stops the launched processes; logs are in `log/`.
 
-Launch the top-level drone graph:
+The verified Gemini E profile is **RGB 640×360 + depth 640×360, 5 fps, hardware
+depth-to-colour registration**. The 640×480 pair streams images but reports zero
+factory intrinsics. See [camera setup](DEPTH_CAMERA_DRIVER_SETUP.md).
+
+## Gyro calibration
+
+Keep the module stationary for three seconds at startup. The portal distinguishes
+Calibrated · not fused from Assisting. A stable bias does not prove rotational
+scale, mounting or camera timestamp alignment. To enable assistance after testing
+known rotations, pass `--gyro-config config/gyro.json`; use this structure:
+
+```json
+{
+  "enabled": false,
+  "mounting_validated": false,
+  "rotation_camera_from_gyro": [[1,0,0],[0,1,0],[0,0,1]],
+  "range_dps": 500,
+  "scale": 1.0,
+  "time_offset": 0.0
+}
+```
+
+Replace the identity with the measured mount rotation and validate positive and
+negative rotations on every axis before setting both flags true. Time offset is
+added to gyro timestamps. Gaps and stale hardware invalidate rotation assistance.
+There is no acceleration-based fallback.
+
+## Development and evaluation on the Mac
 
 ```bash
-ros2 launch drone_control drone_launch.py
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m unittest discover -s tests
+python tests/test_pipeline.py
+python scripts/evaluate.py
+python -m tracking.server --demo
 ```
 
-Launch with rosbridge for the frontend:
+Demo mode raycasts a synthetic textured room through the real estimator. Its
+images are labelled SIMULATION; it never substitutes for missing live data.
+PnP is the default, chosen from comparisons on the actual Pi and camera.
+Use `--method svd` or `--method pnp` to compare solvers. The browser renders the
+3D scene; sensor processing runs on the Pi, offline evaluations on the Mac.
 
-```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true
-```
+Record sequence saves up to 300 paired RGB-D frames in `recordings/` on the Pi.
+Stop it early to limit storage. Evaluate a saved sequence with
+`python scripts/evaluate.py recordings/<sequence>`; without external ground truth
+this establishes throughput and repeatability, not pose accuracy.
+For a brief Pi comparison without writing images, run
+`python3 scripts/live_compare.py` with the camera running and ROS sourced.
+For a downloaded TUM freiburg1_xyz dataset, run
+`python scripts/evaluate_tum.py /path/to/rgbd_dataset_freiburg1_xyz --stride 6`.
+Dataset files and recordings are excluded from Git.
 
-The frontend performs the depth thermal overlay in the browser by combining `/camera/depth/image_raw` with `/thermal/image_raw`. The dashboard subscribes to `/camera/depth/camera_info` and uses it for the depth FOV when available, falling back to H67 x V53.6 degrees. The top-level graph can start the camera, IMU, odometry, cropper, and rosbridge concurrently. The MI0802 process waits only for the first depth topic before starting.
+## Validation (2026-09-08)
 
-To start the MPU6050 with the drone graph, pass `start_imu:=true`. The node defaults to `/dev/i2c-1`, address `0x68`, publishes raw IMU samples on `/imu/data_raw`, and publishes the chip temperature on `/imu/temperature`:
+The 16 Python tests and the pipeline check pass on both the Mac and Pi
+(OpenCV 5.0 / NumPy 2.5 on Mac; OpenCV 4.6 / NumPy 1.26 on Pi).
+The retained thermal driver's Pi colcon run passes all 6 reported tests.
 
-```bash
-ros2 launch drone_control drone_launch.py start_imu:=true
-```
+Final solver comparison on the Mac; position RMSE includes held poses on lost
+frames, with only the initial camera frame used for alignment:
 
-To start the downward optical-flow and range module, pass `start_flow_range:=true`.
-The defaults use `/dev/spidev0.1` for PMW3901, `/dev/i2c-1` address `0x29` for
-VL53L1X, `/optical_flow/raw` for raw flow, and `/range/down` for distance:
+| Input | SVD tracked | PnP tracked | SVD position RMSE | PnP position RMSE |
+|---|---:|---:|---:|---:|
+| Synthetic room, 80 frames | 79 | 79 | 0.0023 m | 0.0471 m |
+| TUM fr1_xyz, stride 6, 133 frames | 126 | 128 | 0.0508 m | 0.0872 m |
 
-```bash
-ros2 launch drone_control drone_launch.py start_flow_range:=true
-ros2 topic echo /optical_flow/raw
-ros2 topic echo /range/down
-```
+[TUM RGB-D](https://cvg.cit.tum.de/data/datasets/rgbd-dataset/file_formats) is a different camera and scene. These results do not establish accuracy
+on this module. The initial stationary Pi comparison favored PnP; movement
+accuracy and gyro mounting/timing still require physical motion validation.
+No model training is required for either solver. Large dataset evaluation or
+future training belongs on the Mac.
 
-The flow driver also publishes surface quality and shutter values. A shutter
-near 8191 indicates insufficient light rather than a broken SPI connection.
-See `src/sensors/flow_range_sensor_node/README.md` for pinout and parameters.
-
-To start gyro odometry, pass `start_odom:=true`; this also starts the MPU6050 and the
-PMW3901/VL53L1X flow-range driver by default. No
-camera stream is required. Keep the drone stationary while startup calibration collects 1000
-gyro samples and estimates angular-rate bias. Stationarity is determined primarily from sample
-variation, allowing a stable zero-rate sensor offset to be learned:
-
-```bash
-ros2 launch drone_control drone_launch.py \
-  start_odom:=true
-ros2 topic echo /odom
-```
-
-The node consumes `/imu/data_raw`, `/optical_flow/raw`, and `/range/down`. Its stationary calibration normalizes the measured
-acceleration magnitude to standard gravity, allowing integration to work with MPU-compatible
-boards whose effective acceleration scale differs from register readback. It publishes completion
-on `/odom/calibrated` once per second (with transient-local durability for native ROS subscribers)
-and applies a ten-read rolling mean to gyro and acceleration before publishing bias-corrected gyro
-values, integrated relative orientation, and diagnostic acceleration on
-`/imu/data_calibrated`. By default it also removes the calibrated gravity reference and integrates
-acceleration into three-dimensional `/odom` velocity and position. Quality-gated optical flow
-corrects planar velocity using the live range scale, while the rangefinder corrects relative Z.
-When either external measurement is stale or rejected, acceleration integration remains the
-fallback and will drift. Parameters are configured in
-`src/localization/odom_node/config/params.yaml`; replace the default IMU mount rotation with the
-measured value before flight. See the package README for estimator limitations.
-
-For a stationary bench setup, `odom_static_override:=true` bypasses calibration and publishes a
-fixed, calibrated origin pose with observed position covariance. This makes visualization clients
-such as the iPhone app report a complete tracked pose. Disable the override before the robot moves:
-
-```bash
-ros2 launch drone_control drone_launch.py \
-  start_odom:=true odom_static_override:=true
-```
-
-`odom_quality_override:=true` is the less invasive visualization override: gyro orientation keeps
-updating, but the node reports its unmeasured zero translation with low covariance so the iPhone
-shows **Tracking**. It does not improve the underlying estimate.
-
-The thermal cropper publishes the tight selected depth ROI rather than a full-size image padded
-with zeros. Its output uses latest-only ROS QoS and defaults to `depth_output_decimation:=2`, which
-keeps every second pixel in each axis and reduces the rosbridge depth payload by a further 4x.
-CameraInfo dimensions and intrinsics are adjusted to match, so point-cloud geometry remains valid.
-The depth camera remains on the project's verified 5 fps profile. Use
-`depth_output_decimation:=1` when full cropped resolution is required.
-
-Crop detection thresholds the native thermal pixels, groups occupied analysis cells into
-8-connected components, selects the largest component (breaking ties by its true hot-pixel count),
-and inflates only that component's real highlighted pixels. A three-frame hold prevents brief
-thermal threshold dropouts from switching the depth stream between cropped and full-frame output.
-Depth projection uses one contiguous cached depth-to-thermal lookup rather than a vector per
-thermal pixel, keeping per-frame work bounded and cache-friendly.
-
-To start the Orbbec camera alongside the thermal node for browser-side overlay,
-pass the camera flag:
-
-```bash
-ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true
-```
-
-The optional ROS-side overlay executable is still available for experiments, but
-it is not required by the dashboard. Build it only if you need the ROS topic
-`/camera/thermal_overlay/image_raw`:
-
-```bash
-sudo apt install -y ros-jazzy-cv-bridge libopencv-dev
-colcon build --packages-up-to drone_control --cmake-args -DBUILD_THERMAL_OVERLAY=ON
-ros2 launch drone_control drone_launch.py start_rosbridge:=true start_depth_camera:=true start_thermal_overlay:=true overlay_alpha:=0.45
-```
-
-For direct low-level MI0802 testing, launch the sensor package by itself:
-
-```bash
-ros2 launch mi0802_senxor_driver mi0802_senxor_launch.py
-```
-
-The thermal node publishes calibrated Celsius pixels as `sensor_msgs/Image` (`32FC1`, width 80, height 62) at `/thermal/image_raw`. Override the default `/dev/ttyACM0` path with the stable target path when desired:
-
-```bash
-ros2 launch mi0802_senxor_driver mi0802_senxor_launch.py device:=/dev/serial/by-id/usb-Nuvoton_USB_Virtual_COM-if00
-```
-
-The ROS user needs serial access, normally through membership in `dialout`. See
-`src/sensors/mi0802_senxor_driver/README.md` for parameters and verification commands. The
-MLX90640 driver remains available and can be restored in `drone_launch.py` or launched
-directly with `ros2 launch mlx90640_node mlx90640_launch.py`.
-
-For direct MPU6050 testing:
-
-```bash
-ros2 launch mpu6050_node mpu6050_launch.py
-```
-
-The executing user must be permitted to open `/dev/ttyACM0` (normally via `dialout`) and `/dev/i2c-1` for the MPU6050 (normally via `i2c`). No Python SenXor runtime is required by the C++ thermal node.
+A 20-frame recording from this Gemini E was also evaluated on the Mac:
+PnP tracked 19/20 frames (one initialization), median 17.6 ms, maximum
+position variation 0.0008 m; SVD tracked 19/20, median 17.9 ms, variation
+0.0080 m. This is a stationary repeatability check, not ground-truth accuracy.
+The deployed portal passed live RGB/depth/thermal JPEG checks, PLY export,
+map reset, bounded recording, and a clean supervisor stop/restart. Browser
+checks covered the three live tabs, camera-follow, scene fit and no console
+errors. The 20-frame recording remains on the Pi in
+`recordings/20260908-141011`; its Mac evaluation copy is in
+`/tmp/camera-gyro-live-recording`.

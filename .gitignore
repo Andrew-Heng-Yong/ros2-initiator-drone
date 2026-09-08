@@ -2,3 +2,8 @@
 /build/
 /install/
 /log/
+__pycache__/
+*.pyc
+.venv/
+/recordings/
+.DS_Store

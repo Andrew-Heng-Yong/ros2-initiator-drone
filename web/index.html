@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Camera + Gyro · Scene</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">{"imports":{"three":"/three.module.js"}}</script>
+</head>
+<body>
+  <header><div class="brand"><span class="mark">◈</span> Camera + Gyro <span class="divider">/</span> <span class="muted">Scene</span></div><div id="connection" role="status">Connecting…</div></header>
+  <div id="demo-warning" hidden role="status">SIMULATION · Synthetic test images and motion. This is not the Raspberry Pi camera.</div>
+  <main>
+    <section class="viewport" aria-label="3D scene">
+      <div id="scene" tabindex="0" aria-label="3D scene. Drag to orbit, scroll to zoom, right drag to pan. Arrow keys orbit; plus and minus zoom."></div>
+      <div class="scene-title"><span class="eyebrow">LOCAL RECONSTRUCTION</span><h1>Your surroundings, in 3D.</h1><span id="point-count">Waiting for depth</span></div>
+      <div class="scene-tools"><button id="fit">Fit scene</button><button id="follow" aria-pressed="false">Follow camera</button><label><input id="show-path" type="checkbox" checked> Trajectory</label></div>
+      <div id="empty"><span class="empty-icon">◈</span><strong id="empty-title">Waiting for camera</strong><p id="empty-reason">The scene appears when calibrated RGB-D frames arrive.</p></div>
+      <div class="scene-footer"><span><i class="legend-dot"></i>Camera <i class="legend-line"></i>Path</span><span>Drag to orbit · Scroll to zoom · Grid 1 m</span></div>
+    </section>
+    <aside>
+      <section class="panel"><div class="panel-head"><h2>Tracking</h2><span id="mode" class="badge">LIVE</span></div><div id="tracking" class="tracking">Waiting</div><p id="reason">Waiting for camera frames</p><div class="position"><div><span>X · right</span><strong id="x">—</strong></div><div><span>Y · down</span><strong id="y">—</strong></div><div><span>Z · forward</span><strong id="z">—</strong></div></div><p class="small">Metres from the starting camera position. The reference is not gravity aligned.</p><dl><div><dt>Visual inliers</dt><dd id="inliers">—</dd></div><div><dt>Frame processing</dt><dd id="latency">—</dd></div><div><dt>Gyroscope</dt><dd id="gyro">Connecting</dd></div></dl></section>
+      <section class="panel feed-panel"><div class="panel-head"><h2>Camera</h2><span id="feed-state" class="muted">Waiting</span></div><div class="tabs" role="tablist" aria-label="Camera feed"><button role="tab" aria-selected="true" data-feed="rgb">RGB</button><button role="tab" aria-selected="false" data-feed="depth">Depth</button><button role="tab" aria-selected="false" data-feed="thermal">Thermal</button></div><div class="feed"><img id="camera-image" alt="Live RGB camera image" hidden><span id="feed-empty">No image yet</span></div><p id="feed-caption" class="small">RGB and registered depth drive tracking.</p></section>
+      <section class="panel actions"><button id="record">Record sequence</button><a id="export" href="/api/map.ply" download="scene.ply">Save 3D map</a><button id="reset" class="quiet">Start a new map</button><p id="action-status" role="status" class="small"></p></section>
+    </aside>
+  </main>
+  <footer><span>Camera pose + coloured point cloud</span><span>Local odometry · drift accumulates</span></footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
