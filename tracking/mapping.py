@@ -79,8 +79,13 @@ class SceneMap:
         colors = rgb[np.ix_(rows, cols)][valid]
         points = np.column_stack((world_points, colors))
 
-        for point in points:
-            key = tuple(np.floor(point[:3] / self.voxel_size).astype(np.int64))
+        # Compute voxel coordinates in one NumPy pass.  Avoiding the old
+        # per-pixel floor/array allocation is particularly important on the
+        # Pi.  Keep the row-major loop itself so duplicate samples that become
+        # eligible again after oldest eviction retain the original semantics.
+        voxel_keys = np.floor(world_points / self.voxel_size).astype(np.int64)
+        for point, voxel_key in zip(points, voxel_keys):
+            key = tuple(voxel_key)
             if key in self._voxels:
                 continue
             if len(self._voxels) >= self.max_points:

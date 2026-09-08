@@ -12,11 +12,17 @@ ROOT=Path(__file__).resolve().parents[1]
 def main():
     logs=ROOT/'log'
     logs.mkdir(exist_ok=True)
+    # Direct parameters avoid the legacy launch file silently dropping options.
+    camera_parameters=(
+        'camera_name:=camera','enable_color:=true','color_width:=640','color_height:=360',
+        'color_fps:=15','color_format:=MJPG','enable_depth:=true','depth_width:=640',
+        'depth_height:=360','depth_fps:=15','depth_format:=Y11','enable_ir:=false',
+        'enable_accel:=false','enable_gyro:=false','depth_registration:=true',
+        'align_mode:=HW','enable_frame_sync:=false','enable_point_cloud:=false')
     commands=[
-        ('camera',['ros2','launch','orbbec_camera','gemini_e.launch.py',
-                   'enable_color:=true','color_width:=640','color_height:=360','color_fps:=5',
-                   'enable_depth:=true','depth_width:=640','depth_height:=360','depth_fps:=5',
-                   'enable_ir:=false','depth_registration:=true','align_mode:=HW','enable_point_cloud:=false']),
+        ('camera',['ros2','run','orbbec_camera','orbbec_camera_node','--ros-args',
+                   '-r','__node:=camera','-r','__ns:=/camera']
+                  +[arg for value in camera_parameters for arg in ('-p',value)]),
         ('thermal',['ros2','run','mi0802_senxor_driver','mi0802_senxor_node']),
         ('portal',[sys.executable,'-m','tracking.server',*sys.argv[1:]])]
     processes=[]

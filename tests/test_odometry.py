@@ -161,6 +161,75 @@ class RGBDOdometryTests(unittest.TestCase):
         self.assertEqual(result["solver"], "pnp")
         self.assertGreaterEqual(result["inliers"], 6)
 
+    def test_pnp_rejects_depth_inconsistent_image_fit(self):
+        K, first, first_depth, second, second_depth, _ = _synthetic_rgbd()
+        odometry = RGBDOdometry(K, method="pnp", min_inliers=6, seed=3)
+        odometry.update(first, first_depth, 0.0)
+        # The pixels still describe the same image motion, but the registered
+        # endpoint depth is on a different surface.  PnP must hold the pose
+        # instead of integrating this image-only fit into the map.
+        inconsistent_depth = np.full_like(second_depth, 2.0)
+        result = odometry.update(second, inconsistent_depth, 1.0)
+        self.assertEqual(result["status"], "lost")
+        self.assertIsNone(result["solver"])
+        np.testing.assert_allclose(result["pose"], np.eye(4))
+
+    def test_recent_accepted_reference_recovers_after_active_reference_failure(self):
+        K, first, first_depth, second, second_depth, _ = _synthetic_rgbd()
+
+        class ActiveReferenceFailure(RGBDOdometry):
+            def __init__(self):
+                super().__init__(
+                    K,
+                    method="pnp",
+                    min_inliers=6,
+                    keyframe_translation_m=10.0,
+                    keyframe_rotation_rad=10.0,
+                    seed=3,
+                )
+                self.reference_kinds = []
+
+            def _estimate_for_keyframe(
+                self,
+                reference_depth,
+                reference_keypoints,
+                reference_descriptors,
+                current_depth,
+                current_keypoints,
+                current_descriptors,
+                rotation_prior,
+            ):
+                if reference_depth is self._reference_depth:
+                    kind = "active"
+                elif reference_depth is self._recovery_depth:
+                    kind = "recovery"
+                else:
+                    kind = "origin"
+                self.reference_kinds.append(kind)
+                # Force the deterministic fallback path after the first
+                # accepted frame; the recovery frame contains the same view.
+                if kind == "active" and self._recovery_descriptors is not None:
+                    return None, 0
+                return super()._estimate_for_keyframe(
+                    reference_depth,
+                    reference_keypoints,
+                    reference_descriptors,
+                    current_depth,
+                    current_keypoints,
+                    current_descriptors,
+                    rotation_prior,
+                )
+
+        odometry = ActiveReferenceFailure()
+        odometry.update(first, first_depth, 0.0)
+        tracked = odometry.update(second, second_depth, 1.0)
+        recovered = odometry.update(second, second_depth, 2.0)
+        self.assertEqual(tracked["status"], "tracking")
+        self.assertEqual(recovered["status"], "tracking")
+        self.assertEqual(odometry.reference_kinds[-2:], ["active", "recovery"])
+        np.testing.assert_allclose(recovered["pose"], tracked["pose"], atol=0.02)
+        self.assertEqual(odometry.reference_timestamp, 2.0)
+
     def test_svd_is_strict_and_auto_owns_pnp_fallback(self):
         K, first, first_depth, second, second_depth, _ = _synthetic_rgbd()
         strict = RGBDOdometry(K, method="svd", min_inliers=6)

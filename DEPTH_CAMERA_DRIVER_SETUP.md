@@ -9,7 +9,7 @@ compatibility before changing driver branches.
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/orbbec_ws/install/setup.bash
-ros2 launch orbbec_camera gemini_e.launch.py enable_color:=true color_width:=640 color_height:=360 color_fps:=5 enable_depth:=true depth_width:=640 depth_height:=360 depth_fps:=5 enable_ir:=false depth_registration:=true align_mode:=HW enable_point_cloud:=false
+ros2 run orbbec_camera orbbec_camera_node --ros-args -r __node:=camera -r __ns:=/camera -p camera_name:=camera -p enable_color:=true -p color_width:=640 -p color_height:=360 -p color_fps:=15 -p color_format:=MJPG -p enable_depth:=true -p depth_width:=640 -p depth_height:=360 -p depth_fps:=15 -p depth_format:=Y11 -p enable_ir:=false -p enable_accel:=false -p enable_gyro:=false -p depth_registration:=true -p align_mode:=HW -p enable_frame_sync:=false -p enable_point_cloud:=false
 ```
 
 The rebuild uses this profile. RGB and depth must both be 640×360: the camera's
@@ -39,10 +39,17 @@ ros2 topic hz /camera/depth/image_raw
 ```
 
 Require positive focal lengths, matching dimensions/optical frames and fresh
-timestamps. RGB and depth are associated within 65 ms; only the latest unprocessed
+timestamps. RGB and depth are associated within 35 ms by message timestamp; only the latest unprocessed
 pair is retained. Hardware registration aligns pixels spatially; it does not imply
 synchronized exposure times.
 
 Stop any existing camera launcher and children before starting this stack.
 Restarting only a shell wrapper can leave the ROS component container holding USB.
 The new supervisor stops its whole process groups.
+
+The original Gemini E launch file does not forward `enable_frame_sync`.
+Testing it through the standalone node confirmed the SDK reports this device
+does not support frame sync. It remains disabled explicitly. The 15 fps profile
+and tighter software association reduce timestamp mismatch; they do not prove
+hardware exposure synchronization. The application records both image timestamps
+for subsequent timing analysis.

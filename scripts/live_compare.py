@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-PAIR_TOLERANCE_S = 0.065
+PAIR_TOLERANCE_S = 0.035
 
 
 def _percentile(values, percentile):

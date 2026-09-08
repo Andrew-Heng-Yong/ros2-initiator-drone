@@ -92,6 +92,40 @@ class GyroMathTests(unittest.TestCase):
         json.dumps(gyro.status())
         gyro.close()
 
+    def test_recording_snapshot_calibrated_and_unavailable_shapes(self) -> None:
+        calibrated = Gyro(
+            device="/definitely/missing",
+            range_dps=500,
+            scale=1.25,
+            time_offset=0.02,
+            calibration_duration=0.1,
+        )
+        values = np.array([0.02, -0.01, 0.03])
+        for index in range(13):
+            calibrated.inject_sample(index * 0.01, values)
+        snapshot = calibrated.recording_snapshot()
+        self.assertEqual(snapshot["samples"].shape, (13, 4))
+        self.assertEqual(snapshot["bias_rad_s"].shape, (3,))
+        self.assertTrue(snapshot["calibrated"])
+        np.testing.assert_allclose(snapshot["samples"][:, 1:], np.tile(values, (13, 1)))
+        np.testing.assert_allclose(snapshot["bias_rad_s"], values)
+        self.assertEqual(snapshot["sample_columns"].tolist(), [
+            "timestamp_s", "gx_rad_s", "gy_rad_s", "gz_rad_s"
+        ])
+        self.assertTrue(snapshot["scale_applied"])
+        self.assertTrue(snapshot["time_offset_applied"])
+        self.assertFalse(snapshot["bias_subtracted"])
+        self.assertEqual(snapshot["range_dps"], 500)
+        calibrated.close()
+
+        unavailable = Gyro(device="/definitely/missing")
+        unavailable_snapshot = unavailable.recording_snapshot()
+        self.assertEqual(unavailable_snapshot["samples"].shape, (0, 4))
+        self.assertEqual(unavailable_snapshot["bias_rad_s"].shape, (3,))
+        self.assertTrue(np.isnan(unavailable_snapshot["bias_rad_s"]).all())
+        self.assertFalse(unavailable_snapshot["calibrated"])
+        unavailable.close()
+
     def test_hardware_path_reads_gyro_block_only(self) -> None:
         selected = {"register": None}
         writes: list[bytes] = []

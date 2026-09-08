@@ -57,7 +57,7 @@ class Tracker:
         with self.lock:
             self.metrics['thermal_range'] = [round(float(low), 1), round(float(high), 1)]
 
-    def process(self, rgb, depth, K, stamp, sync_error=0.):
+    def process(self, rgb, depth, K, stamp, sync_error=0., depth_stamp=None):
         start = time.monotonic()
         self.preview('rgb', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
         display = cv2.applyColorMap((np.nan_to_num(depth) * 255 / 6).clip(0, 255).astype('uint8'), cv2.COLORMAP_TURBO)
@@ -105,7 +105,16 @@ class Tracker:
                                 sync_ms=round(sync_error*1000, 1),
                                 valid_depth_percent=round(float(np.mean(np.isfinite(depth) & (depth>.2) & (depth<6)))*100, 1))
             if self.record_dir and self.record_count < 300:
-                np.savez_compressed(self.record_dir / f'{self.record_count:05d}.npz', rgb=rgb, depth=depth, K=K, timestamp=stamp)
+                sensors = {'gyro_'+k: v for k,v in self.gyro.recording_snapshot().items()} if self.gyro else {}
+                # Compression cost ~112 ms/frame on Pi versus ~15 ms for raw NPZ.
+                target = self.record_dir / f'{self.record_count:05d}.npz'
+                temporary = target.with_suffix('.npz.part')
+                with temporary.open('wb') as stream:
+                    np.savez(stream, rgb=rgb, depth=depth, K=K, timestamp=stamp,
+                             depth_timestamp=stamp if depth_stamp is None else depth_stamp,
+                             sync_error=sync_error, pose=self.pose, tracking_status=self.status,
+                             **sensors)
+                temporary.replace(target)
                 self.record_count += 1
                 if self.record_count == 300:
                     self.record_dir = None
@@ -138,6 +147,7 @@ def run_ros(tracker, stop):
     queues = {'rgb': deque(maxlen=8), 'depth': deque(maxlen=8)}
     calibration = {}
     pending = deque(maxlen=1)  # Keep live latency bounded if processing takes longer than a frame.
+    pending_thermal = deque(maxlen=1)
     condition = threading.Condition()
 
     def info(msg):
@@ -152,7 +162,9 @@ def run_ros(tracker, stop):
             return
         match = min(queues[other], key=lambda pair: abs(pair[0]-stamp))
         error = abs(match[0]-stamp)
-        if error > .065:
+        # Unsynchronized 15 Hz streams drift through a 33 ms half-period.
+        # A 20 ms cutoff caused measured 2.8 s stretches without a pair.
+        if error > .035:
             return
         queues[other].remove(match)
         queues[kind].pop()
@@ -164,10 +176,17 @@ def run_ros(tracker, stop):
     def worker():
         while not stop.is_set():
             with condition:
-                condition.wait_for(lambda: pending or stop.is_set(), timeout=.5)
-                if not pending:
-                    continue
-                rgb_msg, depth_msg, error, cal = pending.pop()
+                condition.wait_for(lambda: pending or pending_thermal or stop.is_set(), timeout=.5)
+                pair = pending.pop() if pending else None
+                thermal_msg = pending_thermal.pop() if pending_thermal else None
+            if thermal_msg is not None:
+                try:
+                    tracker.thermal(bridge.imgmsg_to_cv2(thermal_msg, 'passthrough'))
+                except Exception as error:
+                    node.get_logger().error('Thermal preview: '+str(error))
+            if pair is None:
+                continue
+            rgb_msg, depth_msg, error, cal = pair
             try:
                 rgb = bridge.imgmsg_to_cv2(rgb_msg, 'rgb8')
                 depth = bridge.imgmsg_to_cv2(depth_msg, 'passthrough').astype('float32')
@@ -184,22 +203,33 @@ def run_ros(tracker, stop):
                     rgb = cv2.remap(rgb,mx,my,cv2.INTER_LINEAR)
                     depth = cv2.remap(depth,mx,my,cv2.INTER_NEAREST)
                 stamp = rgb_msg.header.stamp.sec + rgb_msg.header.stamp.nanosec*1e-9
-                tracker.process(rgb, depth, K, stamp, error)
+                depth_stamp = depth_msg.header.stamp.sec + depth_msg.header.stamp.nanosec*1e-9
+                tracker.process(rgb, depth, K, stamp, error, depth_stamp)
             except Exception as error:
                 with tracker.lock:
                     tracker.status, tracker.reason = 'error', str(error)
                 node.get_logger().error(str(error))
 
+    def thermal_frame(msg):
+        # ROS callbacks must not wait for the processing/map lock.
+        with condition:
+            pending_thermal.append(msg)
+            condition.notify()
+
     node.create_subscription(CameraInfo, '/camera/color/camera_info', info, qos_profile_sensor_data)
     node.create_subscription(Image, '/camera/color/image_raw', lambda m:frame('rgb',m), qos_profile_sensor_data)
     node.create_subscription(Image, '/camera/depth/image_raw', lambda m:frame('depth',m), qos_profile_sensor_data)
-    node.create_subscription(Image, '/thermal/image_raw', lambda m:tracker.thermal(bridge.imgmsg_to_cv2(m,'passthrough')), qos_profile_sensor_data)
+    node.create_subscription(Image, '/thermal/image_raw', thermal_frame, qos_profile_sensor_data)
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     try:
         while not stop.is_set():
             rclpy.spin_once(node, timeout_sec=.2)
     finally:
+        stop.set()
+        with condition:
+            condition.notify_all()
+        thread.join(timeout=5)
         node.destroy_node()
         rclpy.shutdown()
 
@@ -315,6 +345,7 @@ def main():
     finally:
         stop.set()
         server.server_close()
+        thread.join(timeout=5)
         if gyro:
             gyro.close()
 

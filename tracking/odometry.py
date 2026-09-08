@@ -332,6 +332,15 @@ class RGBDOdometry:
         self._origin_timestamp: Optional[float] = None
         self._origin_pose = np.eye(4, dtype=np.float64)
         self._active_is_origin = True
+        # Keep one recent accepted RGB-D reference in addition to the active
+        # keyframe.  It is a bounded recovery aid for long walks and dropped
+        # input intervals; its pose is only committed after the same vision,
+        # depth, and motion gates as the active reference.
+        self._recovery_depth: Optional[np.ndarray] = None
+        self._recovery_keypoints = []
+        self._recovery_descriptors: Optional[np.ndarray] = None
+        self._recovery_timestamp: Optional[float] = None
+        self._recovery_pose = np.eye(4, dtype=np.float64)
         self._last_timestamp: Optional[float] = None
         self._last_good_timestamp: Optional[float] = None
         self._pose = np.eye(4, dtype=np.float64)
@@ -390,7 +399,36 @@ class RGBDOdometry:
             prior,
         )
         reference_pose = self._reference_pose
+        used_recovery = False
         used_origin = False
+        if (
+            candidate is None
+            and self.method != "svd"
+            and self._recovery_descriptors is not None
+            and self._recovery_timestamp != self._reference_timestamp
+        ):
+            recovery_candidate, recovery_matches = self._estimate_for_keyframe(
+                self._recovery_depth,
+                self._recovery_keypoints,
+                self._recovery_descriptors,
+                depth,
+                keypoints,
+                descriptors,
+                # The caller's prior spans the active reference.  It is not
+                # valid for this older recovery frame, so vision stands alone.
+                None,
+            )
+            if recovery_matches:
+                match_count = recovery_matches
+            # A recovery reference may span a long input gap.  Require a
+            # stronger consensus before using it to bridge that gap; the
+            # normal active/origin paths retain the configured minimum.
+            if recovery_candidate is not None and recovery_candidate[2] < max(50, self.min_inliers):
+                recovery_candidate = None
+            if recovery_candidate is not None:
+                candidate = recovery_candidate
+                reference_pose = self._recovery_pose
+                used_recovery = True
         if candidate is None and not self._active_is_origin:
             # The supplied prior spans the active keyframe timestamp.  It is
             # therefore not valid for the older origin anchor; let the
@@ -428,6 +466,7 @@ class RGBDOdometry:
             relative_rotation = _rotation_difference_rad(np.eye(3), rotation)
             if (
                 used_origin
+                or used_recovery
                 or relative_motion >= self.keyframe_translation_m
                 or relative_rotation >= self.keyframe_rotation_rad
             ):
@@ -440,6 +479,10 @@ class RGBDOdometry:
                     world_pose,
                     preserve_origin=True,
                 )
+        if descriptors is not None and len(keypoints) >= 4:
+            self._save_recovery_reference(
+                depth, keypoints, descriptors, current_timestamp, world_pose
+            )
         return self._result(match_count, inliers, rmse, solver)
 
     def _validate_frame(
@@ -516,6 +559,17 @@ class RGBDOdometry:
         else:
             self._active_is_origin = False
 
+    def _save_recovery_reference(
+        self, depth, keypoints, descriptors, timestamp, world_pose
+    ) -> None:
+        """Retain the latest accepted frame for a gated local re-acquisition."""
+
+        self._recovery_depth = depth.copy()
+        self._recovery_keypoints = list(keypoints)
+        self._recovery_descriptors = descriptors.copy()
+        self._recovery_timestamp = float(timestamp)
+        self._recovery_pose = np.asarray(world_pose, dtype=np.float64).copy()
+
     def _estimate_for_keyframe(
         self,
         reference_depth,
@@ -547,6 +601,7 @@ class RGBDOdometry:
                 current_points,
                 pnp_reference_points,
                 pnp_current_pixels,
+                current_depth,
                 rotation_prior,
             ),
             len(matches),
@@ -669,6 +724,7 @@ class RGBDOdometry:
         current_points: np.ndarray,
         pnp_reference_points: np.ndarray,
         pnp_current_pixels: np.ndarray,
+        current_depth: np.ndarray,
         rotation_prior: Optional[np.ndarray],
     ):
         svd_candidate = None
@@ -701,6 +757,7 @@ class RGBDOdometry:
         pnp_candidate = self._estimate_pnp(
             pnp_reference_points,
             pnp_current_pixels,
+            current_depth,
             rotation_prior,
         )
         return pnp_candidate
@@ -709,6 +766,7 @@ class RGBDOdometry:
         self,
         reference_points: np.ndarray,
         current_pixels: np.ndarray,
+        current_depth: np.ndarray,
         rotation_prior: Optional[np.ndarray],
     ):
         if len(reference_points) < 4 or len(current_pixels) != len(reference_points):
@@ -722,6 +780,7 @@ class RGBDOdometry:
             return self._estimate_pnp(
                 reference_points,
                 current_pixels,
+                current_depth,
                 None,
             )
 
@@ -828,8 +887,19 @@ class RGBDOdometry:
         translation = -rotation @ np.asarray(tvec, dtype=np.float64).reshape(3)
 
         # Keep this alternate solver reprojection driven.  Current depth is
-        # often noisier than the registered RGB pixels; replacing a good PnP
-        # pose with an unconditional 3-D fit would reintroduce that noise.
+        # often noisier than the registered RGB pixels; use it only as a
+        # bounded consistency gate, never as an unconditional replacement
+        # pose.  This rejects image-consistent matches on moving objects or
+        # wrong surfaces while retaining PnP's pose and LM refinement.
+        if not self._depth_consistency_ok(
+            reference_points,
+            current_pixels,
+            current_depth,
+            mask,
+            rotation,
+            translation,
+        ):
+            return retry_without_prior()
         rmse = float(np.sqrt(np.mean(np.square(pixel_residual[mask]))))
         if not np.isfinite(rmse) or not self._accepted(
             rotation,
@@ -842,6 +912,54 @@ class RGBDOdometry:
         ):
             return retry_without_prior()
         return rotation, translation, int(mask.sum()), rmse, "pnp"
+
+    def _depth_consistency_ok(
+        self,
+        reference_points: np.ndarray,
+        current_pixels: np.ndarray,
+        current_depth: np.ndarray,
+        pixel_mask: np.ndarray,
+        rotation: np.ndarray,
+        translation: np.ndarray,
+    ) -> bool:
+        """Gate PnP with registered depth without changing its pose estimate.
+
+        The current depth is optional in practice because holes are common.
+        When at least eight PnP pixel inliers also have usable depth, their
+        current-camera points must agree with the PnP current-to-reference
+        transform.  A median and upper-quantile test tolerates edge/occlusion
+        samples while rejecting a fit dominated by a moving object or a
+        mismatched surface.  At most 128 points are checked to keep this
+        scalar depth sampling bounded on the Pi.
+        """
+
+        if current_depth is None:
+            return True
+        pixel_indices = np.flatnonzero(np.asarray(pixel_mask, dtype=bool))
+        if len(pixel_indices) > 128:
+            sample_positions = np.linspace(0, len(pixel_indices) - 1, 128, dtype=np.int64)
+            pixel_indices = pixel_indices[sample_positions]
+        residuals = []
+        for index in pixel_indices:
+            depth_m = self._depth_at(current_depth, current_pixels[index])
+            if depth_m is None:
+                continue
+            current_point = self._backproject(current_pixels[index], depth_m)
+            residual = float(
+                np.linalg.norm(current_point @ rotation.T + translation - reference_points[index])
+            )
+            if np.isfinite(residual):
+                residuals.append(residual)
+        # Eight samples are enough to reject the recorded false fits while
+        # still allowing the normal RGB-only fallback when the registered
+        # depth image has fewer usable endpoint samples.
+        if len(residuals) < 8:
+            return True
+        values = np.asarray(residuals, dtype=np.float64)
+        return bool(
+            np.median(values) <= 0.10
+            and np.percentile(values, 75.0) <= 0.20
+        )
 
     def _accepted(
         self,

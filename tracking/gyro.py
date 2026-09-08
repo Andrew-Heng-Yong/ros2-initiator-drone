@@ -513,6 +513,45 @@ class Gyro:
 
         self._record_sample(GyroSample(_timestamp_seconds(timestamp), _vector3(angular_velocity, "angular_velocity")))
 
+    def recording_snapshot(self) -> dict[str, object]:
+        """Return the bounded capture in a form suitable for ``numpy.savez``.
+
+        ``samples`` has columns ``timestamp_s, gx_rad_s, gy_rad_s, gz_rad_s``.
+        Hardware timestamps already include ``time_offset_s`` and hardware
+        rates already include the configured ``scale``; the raw rate samples
+        still include the bias, which is returned separately in the same
+        corrected rad/s units.  Offline consumers must not apply either
+        correction again.  An unavailable or uncalibrated reader returns an
+        empty ``(0, 4)`` sample array and a three-element NaN bias.
+        """
+
+        with self._lock:
+            samples = np.empty((len(self._samples), 4), dtype=np.float64)
+            for index, sample in enumerate(self._samples):
+                samples[index, 0] = sample.timestamp
+                samples[index, 1:] = sample.angular_velocity
+            bias = (
+                self._bias.copy()
+                if self._bias is not None
+                else np.full(3, np.nan, dtype=np.float64)
+            )
+            return {
+                "samples": samples,
+                "sample_columns": np.asarray(
+                    ["timestamp_s", "gx_rad_s", "gy_rad_s", "gz_rad_s"]
+                ),
+                "bias_rad_s": bias,
+                "scale": float(self._scale),
+                "time_offset_s": float(self._time_offset),
+                "range_dps": int(self._range_dps),
+                "calibrated": bool(self._bias is not None),
+                "scale_applied": True,
+                "time_offset_applied": True,
+                "bias_subtracted": False,
+                "angular_velocity_units": "rad/s",
+                "timestamp_units": "Unix seconds",
+            }
+
     def start(self) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
