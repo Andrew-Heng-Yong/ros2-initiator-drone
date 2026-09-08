@@ -3,6 +3,7 @@ import struct
 import tempfile
 import time
 import unittest
+import zlib
 from pathlib import Path
 import numpy as np
 from tracking.server import Tracker
@@ -28,7 +29,7 @@ class SensorContractCheck(unittest.TestCase):
             meta=json.loads(data[8:8+n])
             self.assertEqual(meta['thermal_encoding'],'float32_celsius')
             offset=8+n+meta['jpeg_bytes']
-            decoded=np.frombuffer(data[offset:offset+meta['depth_bytes']],dtype='<f4').reshape(depth.shape)
+            decoded=np.frombuffer(zlib.decompress(data[offset:offset+meta['depth_bytes']],wbits=-15),dtype='<f4').reshape(depth.shape)
             np.testing.assert_array_equal(decoded,depth)
             with np.load(Path(folder)/'00000.npz') as frame:
                 self.assertEqual(frame['thermal'].shape,(62,80))

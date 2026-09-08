@@ -214,7 +214,9 @@ Phone maps are not relayed to the web portal in this version.
 
 - `GET /api/sensors`: newest complete DVS1 packet, or 503 before the first pair.
   Four ASCII magic bytes, uint32 little-endian JSON length, UTF-8 JSON, JPEG RGB,
-  little-endian float32 depth in metres, then float32 thermal in Celsius.
+  raw-DEFLATE-compressed little-endian float32 depth in metres, then independently
+  compressed float32 thermal in Celsius. `numeric_compression=deflate`; byte counts
+  describe compressed blocks, decoded sizes follow from dimensions.
   The JSON includes byte counts, dimensions, row-major K, frame/session IDs,
   individual Unix capture timestamps, gyro samples/calibration, image flip and
   approximate thermal alignment metadata. Numeric depth holes remain NaN.

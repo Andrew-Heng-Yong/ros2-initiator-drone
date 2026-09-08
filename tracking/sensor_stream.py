@@ -7,12 +7,19 @@ import json
 import struct
 import time
 import uuid
+import zlib
 import numpy as np
 
 
 class SensorStream:
     def __init__(self, alignment=None, demo=False):
-        self.alignment = alignment or {}
+        self.alignment = dict(alignment or {})
+        # Accept the previous dashboard's saved JSON without manual renaming.
+        for old, new in [('offsetX', 'offset_x'), ('offsetY', 'offset_y'),
+                         ('barrelDistortion', 'barrel_distortion'),
+                         ('stretchX', 'stretch_x'), ('stretchY', 'stretch_y')]:
+            if old in self.alignment:
+                self.alignment[new] = self.alignment.pop(old)
         self.demo = demo
         self.reset()
 
@@ -27,16 +34,20 @@ class SensorStream:
         self.sequence += 1
         depth = np.asarray(depth, dtype='<f4')
         thermal = np.asarray(thermal if thermal is not None else np.empty((0, 0)), dtype='<f4')
+        def compress(array):
+            encoder = zlib.compressobj(level=1, wbits=-15)
+            return encoder.compress(array.tobytes()) + encoder.flush()
+        depth_payload, thermal_payload = compress(depth), compress(thermal)
         metadata = dict(mode='demo' if self.demo else 'live', version=1, session=self.session, sequence=self.sequence,
                         timestamp=stamp, depth_timestamp=depth_stamp,
                         thermal_timestamp=thermal_stamp, width=depth.shape[1], height=depth.shape[0],
                         thermal_width=thermal.shape[1], thermal_height=thermal.shape[0],
                         K=np.asarray(K).reshape(-1).tolist(), jpeg_bytes=len(jpeg),
-                        depth_bytes=depth.nbytes, thermal_bytes=thermal.nbytes,
+                        depth_bytes=len(depth_payload), thermal_bytes=len(thermal_payload), numeric_compression='deflate',
                         depth_encoding='float32_metres', thermal_encoding='float32_celsius',
                         thermal_flipped_y=True, alignment=self.alignment, gyro=gyro)
         header = json.dumps(metadata, allow_nan=False, separators=(',', ':')).encode()
-        self.packet = b'DVS1' + struct.pack('<I', len(header)) + header + jpeg + depth.tobytes() + thermal.tobytes()
+        self.packet = b'DVS1' + struct.pack('<I', len(header)) + header + jpeg + depth_payload + thermal_payload
 
     def accept_poses(self, value):
         if value.get('session') != self.session:
