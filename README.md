@@ -239,3 +239,6 @@ Validation: `python -m unittest discover -s tests` includes lossless packet,
 recording, session reset and pose-rejection checks. Throughput and AR alignment
 must additionally be measured on the actual phone/rig; build success is not an
 accuracy or sustained-FPS result.
+
+The thermal preview uses fixed 19–28 °C colour limits, so an empty room does not
+become orange when its hottest object leaves. Override with `--thermal-range MIN_C MAX_C`.

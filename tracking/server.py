@@ -20,9 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Tracker:
-    def __init__(self, method='pnp', gyro=None, demo=False, processing='pi', alignment=None):
+    def __init__(self, method='pnp', gyro=None, demo=False, processing='pi', alignment=None, thermal_range=(19., 28.)):
         # ponytail: one processing lock; separate snapshots if HTTP latency becomes limiting.
         self.lock = threading.RLock()
+        if len(thermal_range) != 2 or not np.isfinite(thermal_range).all() or thermal_range[1] <= thermal_range[0]:
+            raise ValueError('Thermal range must contain increasing finite limits')
+        self.thermal_range = tuple(thermal_range)
         self.processing = processing
         self.stream = SensorStream(alignment, demo)
         self.temperatures = None
@@ -59,7 +62,7 @@ class Tracker:
         valid = np.isfinite(temperatures)
         if not valid.any():
             return
-        low, high = np.percentile(temperatures[valid], [2, 98])
+        low, high = self.thermal_range
         normalized = np.nan_to_num((temperatures - low) * 255 / max(high-low, 1))
         self.preview('thermal', cv2.applyColorMap(normalized.clip(0, 255).astype('uint8'), cv2.COLORMAP_INFERNO))
         with self.lock:
@@ -372,6 +375,7 @@ def main():
     parser.add_argument('--port', default=8080, type=int)
     parser.add_argument('--method', choices=['svd','pnp'], default='pnp')
     parser.add_argument('--processing', choices=['pi', 'phone'], default='pi')
+    parser.add_argument('--thermal-range', nargs=2, type=float, default=(19.,28.), metavar=('MIN_C','MAX_C'))
     parser.add_argument('--thermal-alignment', type=Path, default=ROOT/'config'/'thermal-alignment.json')
     parser.add_argument('--demo', action='store_true')
     default_gyro = ROOT/'config'/'gyro.json'
@@ -385,7 +389,7 @@ def main():
         gyro = Gyro(**config)
         gyro.start()
     alignment = json.loads(args.thermal_alignment.read_text()) if args.thermal_alignment.is_file() else {}
-    tracker = Tracker(args.method, gyro, args.demo, args.processing, alignment)
+    tracker = Tracker(args.method, gyro, args.demo, args.processing, alignment, args.thermal_range)
     stop = threading.Event()
     def capture():
         try:

@@ -11,6 +11,16 @@ from tracking.sensor_stream import SensorStream
 
 
 class SensorContractCheck(unittest.TestCase):
+    def test_thermal_colour_does_not_change_when_hot_object_leaves(self):
+        tracker=Tracker(processing='phone')
+        images=[]
+        tracker.preview=lambda name,image: images.append(image.copy())
+        tracker.thermal(np.array([[20.,27.],[20.,20.]],dtype=np.float32))
+        tracker.thermal(np.full((2,2),20.,dtype=np.float32))
+        np.testing.assert_array_equal(images[0][0,0],images[1][0,0])
+        self.assertEqual(tracker.metrics['thermal_range'],[19.,28.])
+        with self.assertRaises(ValueError): Tracker(thermal_range=(28,19))
+
     def test_capture_reset_record_and_pose_contract(self):
         tracker = Tracker(processing='phone')
         rgb = np.full((16, 24, 3), 100, dtype=np.uint8)
