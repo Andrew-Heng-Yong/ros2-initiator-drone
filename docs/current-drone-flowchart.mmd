@@ -1,0 +1,91 @@
+flowchart LR
+    %% Current camera + gyro architecture. Solid arrows are data flow;
+    %% dashed arrows are controls, configuration, or optional assistance.
+
+    subgraph PI["Raspberry Pi / drone"]
+        direction TB
+
+        subgraph CAPTURE["Shared capture"]
+            direction LR
+            ORBBEC[/"Orbbec RGB-D camera"/] --> ORBBEC_DRIVER["Orbbec ROS 2 driver"]
+            ORBBEC_DRIVER -->|"RGB image"| PAIR["RGB/depth timestamp association<br/>maximum difference 35 ms"]
+            ORBBEC_DRIVER -->|"registered metric depth"| PAIR
+            ORBBEC_DRIVER -->|"camera intrinsics K"| PAIR
+
+            THERMAL[/"MI0802 thermal camera"/] --> THERMAL_DRIVER["MI0802 ROS 2 driver<br/>vertical flip"]
+            THERMAL_DRIVER -->|"latest temperatures"| WORKER["Frame-processing worker"]
+
+            GYRO[/"MPU6050 gyroscope"/] --> GYRO_READER["Direct I2C gyro reader<br/>stationary bias calibration"]
+            GYRO_READER -->|"timestamped angular rates"| WORKER
+            PAIR -->|"newest valid RGB-D pair + K"| WORKER
+        end
+
+        WORKER --> PREVIEW["RGB, depth and thermal previews"]
+        WORKER --> PACKET["DVS1 sensor packet builder<br/>RGB JPEG + depth + thermal + gyro + timestamps"]
+        WORKER --> MODE{"Processing mode"}
+
+        subgraph PI_MODE["Default: --processing pi"]
+            direction LR
+            MODE -->|"pi"| PRIOR["Short gyro rotation increment<br/>anchored to last visual pose"]
+            WORKER -->|"RGB-D frame"| ODOM["RGB-D visual odometry<br/>PnP by default"]
+            PRIOR -. "optional rotation prior" .-> ODOM
+            ODOM --> TRACKING{"Tracking accepted?"}
+            TRACKING -->|"yes"| POSE["Update 6-DoF pose<br/>and trajectory"]
+            TRACKING -->|"no"| HOLD["Hold last pose<br/>freeze map and attempt recovery"]
+            POSE --> MOTION{"Moved > 3 cm<br/>or turned > 0.04 rad?"}
+            MOTION -->|"yes"| MAP["Bounded RGB voxel map<br/>4 cm voxels, up to 60,000 points"]
+            MOTION -->|"no"| SKIP["Keep current map"]
+        end
+
+        PACKET --> SENSOR_API["GET /api/sensors"]
+        PREVIEW --> HTTP_API["HTTP portal API"]
+        POSE --> HTTP_API
+        HOLD --> HTTP_API
+        MAP --> HTTP_API
+        HTTP_API -->|"state, scene, images, PLY"| PI_OUTPUT["Web portal / standard DroneView scene"]
+
+        RECORD["Record control"] -.-> RECORDER["Bounded NPZ recorder<br/>up to 300 paired frames"]
+        WORKER --> RECORDER
+        RESET["Reset control"] -.-> SESSION["New sensor session<br/>clear odometry, map and alignment"]
+        SESSION -.-> WORKER
+    end
+
+    subgraph PHONE["LiDAR iPhone / iPad: --processing phone"]
+        direction TB
+        SENSOR_API -->|"Wi-Fi polling"| DECODE["Decode newest DVS1 frame<br/>reject duplicate or stale sequence"]
+        DECODE --> RIG_ODOM["Rig RGB-D odometry<br/>with optional gyro prior"]
+
+        PHONE_CAMERA[/"Phone camera + LiDAR depth"/] --> ARKIT["ARKit world tracking<br/>phone pose + scene depth"]
+        ARKIT --> TIME_MATCH["Timestamp-match phone and rig frames<br/>within 100 ms"]
+        DECODE --> TIME_MATCH
+        RIG_ODOM --> ALIGN["Shared-view RGB-D feature alignment"]
+        TIME_MATCH --> ALIGN
+        ALIGN --> CONFIRM{"3 consistent alignments?"}
+        CONFIRM -->|"yes"| WORLD_XFORM["Transform rig map into ARKit world"]
+        CONFIRM -->|"no"| WAIT["Hold shared textured view"]
+
+        DECODE -->|"rig depth + nearest thermal frame"| THERMAL_FUSION["Thermal/depth projection<br/>4 cm temperature voxel map"]
+        WORLD_XFORM --> THERMAL_FUSION
+        THERMAL_FUSION --> HEAT["Live hot-surface triangles<br/>temperature threshold"]
+        ARKIT --> RENDER["Metal AR renderer"]
+        THERMAL_FUSION --> RENDER
+        HEAT --> RENDER
+        RENDER --> PHONE_OUTPUT["Phone camera view + thermal 3D overlay"]
+
+        WORLD_XFORM --> POSE_POST["POST /api/poses<br/>phone pose + rig pose + diagnostics"]
+        POSE_POST -. "remote status only; phone map is not uploaded" .-> HTTP_API
+    end
+
+    MODE -->|"phone: Pi captures and records only"| SENSOR_API
+
+    classDef sensor fill:#e8f3ff,stroke:#2878b5,color:#102a43;
+    classDef process fill:#f3f0ff,stroke:#7251b5,color:#2b174d;
+    classDef decision fill:#fff3cd,stroke:#b7791f,color:#5f370e;
+    classDef output fill:#e6ffed,stroke:#27864c,color:#123d24;
+    classDef control fill:#f7fafc,stroke:#718096,color:#1a202c,stroke-dasharray:5 5;
+
+    class ORBBEC,THERMAL,GYRO,PHONE_CAMERA sensor;
+    class ORBBEC_DRIVER,PAIR,THERMAL_DRIVER,GYRO_READER,WORKER,PREVIEW,PACKET,PRIOR,ODOM,POSE,HOLD,MOTION,MAP,SKIP,SENSOR_API,HTTP_API,RECORDER,SESSION,DECODE,RIG_ODOM,ARKIT,TIME_MATCH,ALIGN,WORLD_XFORM,WAIT,THERMAL_FUSION,HEAT,RENDER,POSE_POST process;
+    class MODE,TRACKING,CONFIRM decision;
+    class PI_OUTPUT,PHONE_OUTPUT output;
+    class RECORD,RESET control;
